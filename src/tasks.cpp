@@ -1,0 +1,236 @@
+#include "alist/tasks.hpp"
+#include "alist/common.hpp"
+#include "alist/crypto.hpp"
+#include "alist/http_client.hpp"
+#include "alist/security.hpp"
+
+#include <fcntl.h>
+#include <unistd.h>
+
+namespace alist {
+
+TaskManager::TaskManager(VfsEngine& vfs, int num_workers) : vfs_(vfs) {
+    int n = std::clamp(num_workers, 1, 16);
+    for (int i = 0; i < n; ++i) {
+        workers_.emplace_back([this] { worker_loop(); });
+    }
+}
+
+TaskManager::~TaskManager() {
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        stopping_ = true;
+        for (auto& [_, t] : all_tasks_) {
+            t->cancel_flag.store(true, std::memory_order_relaxed);
+        }
+    }
+    cv_.notify_all();
+    for (auto& th : workers_) {
+        if (th.joinable()) th.join();
+    }
+}
+
+void TaskManager::worker_loop() {
+    while (true) {
+        std::shared_ptr<InternalTask> task;
+        {
+            std::unique_lock<std::mutex> lk(mu_);
+            cv_.wait(lk, [&] { return stopping_ || !queue_.empty(); });
+            if (stopping_ && queue_.empty()) return;
+            task = std::move(queue_.front());
+            queue_.pop_front();
+            if (task->cancel_flag.load()) {
+                task->rec.state = "canceled";
+                task->rec.updated_at = unix_now();
+                continue;
+            }
+            task->rec.state = "running";
+            task->rec.status_text = "executing";
+            task->rec.updated_at = unix_now();
+        }
+
+        std::string err;
+        bool ok = false;
+        try {
+            ok = task->runner(*task, err);
+        } catch (const std::exception& ex) {
+            err = ex.what();
+        }
+
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            task->rec.updated_at = unix_now();
+            if (task->cancel_flag.load()) {
+                task->rec.state = "canceled";
+                task->rec.status_text = "canceled";
+            } else if (ok) {
+                task->rec.state = "succeeded";
+                task->rec.status_text = "completed";
+                task->rec.progress = 100.0;
+            } else {
+                task->rec.state = "failed";
+                task->rec.status_text = "error";
+                task->rec.error_msg = std::move(err);
+            }
+        }
+    }
+}
+
+std::string TaskManager::enqueue_copy(std::string creator, std::string src_vpath, std::string dst_dir_vpath) {
+    auto t = std::make_shared<InternalTask>();
+    t->rec.id = "tsk_" + random_hex(8);
+    t->rec.type = "copy";
+    t->rec.name = "copy [" + src_vpath + "] -> [" + dst_dir_vpath + "]";
+    t->rec.creator = std::move(creator);
+    t->rec.state = "pending";
+    t->rec.status_text = "queued";
+    t->rec.created_at = unix_now();
+    t->rec.updated_at = t->rec.created_at;
+
+    t->runner = [this, src = std::move(src_vpath), dst = std::move(dst_dir_vpath)](InternalTask& self, std::string& err) -> bool {
+        if (self.cancel_flag.load()) return false;
+        return vfs_.copy_obj_sync(src, dst, err);
+    };
+
+    std::string id = t->rec.id;
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        // Bound task history to 2000 items
+        if (all_tasks_.size() > 2000) clear_done_tasks_unlocked("");
+        all_tasks_[id] = t;
+        queue_.push_back(std::move(t));
+    }
+    cv_.notify_one();
+    return id;
+}
+
+std::string TaskManager::enqueue_offline_download(std::string creator, std::string url, std::string dst_dir_vpath) {
+    auto t = std::make_shared<InternalTask>();
+    t->rec.id = "tsk_" + random_hex(8);
+    t->rec.type = "offline_download";
+    t->rec.name = "download " + url + " -> " + dst_dir_vpath;
+    t->rec.creator = std::move(creator);
+    t->rec.state = "pending";
+    t->rec.status_text = "queued";
+    t->rec.created_at = unix_now();
+    t->rec.updated_at = t->rec.created_at;
+
+    t->runner = [this, dl_url = std::move(url), dst_dir = std::move(dst_dir_vpath)](InternalTask& self, std::string& err) -> bool {
+        // SSRF check enforced inside HttpClient::perform using allow_private_net_outbound config!
+        auto validated = validate_outbound_url(dl_url, vfs_.config().allow_private_net_outbound, &err);
+        if (!validated) return false;
+
+        // Derive clean filename from URL path
+        std::string_view p = validated->path_and_query;
+        auto qmark = p.find('?');
+        if (qmark != std::string_view::npos) p = p.substr(0, qmark);
+        auto [_, raw_base] = split_vpath(p);
+        std::string fname = url_decode(raw_base).value_or("");
+        if (!is_valid_filename(fname)) {
+            fname = "download_" + random_hex(4) + ".bin";
+        }
+
+        std::string spool = vfs_.config().temp_dir + "/offdl_" + random_hex(8) + ".tmp";
+        UniqueFd wfd(::open(spool.c_str(), O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, 0600));
+        if (!wfd) { err = "Failed creating temp file"; return false; }
+        ScopeExit rm_spool([&] { ::unlink(spool.c_str()); });
+
+        int64_t expected_len = 0;
+        int64_t downloaded = 0;
+        OutboundRequest req;
+        req.url = dl_url;
+        req.allow_private_net = vfs_.config().allow_private_net_outbound;
+        req.timeout_ms = 1800000;
+        req.on_headers = [&](int, const std::map<std::string, std::string>& hdrs) {
+            if (auto it = hdrs.find("content-length"); it != hdrs.end()) {
+                expected_len = parse_i64(it->second).value_or(0);
+            }
+        };
+        req.on_data = [&](const char* d, size_t n) -> bool {
+            if (self.cancel_flag.load()) return false;
+            if (downloaded + static_cast<int64_t>(n) > vfs_.config().max_upload_bytes) {
+                err = "Offline download exceeded max_upload_bytes limit";
+                return false;
+            }
+            if (::write(wfd.get(), d, n) != static_cast<ssize_t>(n)) return false;
+            downloaded += static_cast<int64_t>(n);
+            if (expected_len > 0) {
+                std::lock_guard<std::mutex> lk(mu_);
+                self.rec.progress = std::min(95.0, (static_cast<double>(downloaded) * 95.0) / static_cast<double>(expected_len));
+            }
+            return true;
+        };
+        auto resp = HttpClient::instance().perform(req);
+        if (!resp.ok || resp.status_code < 200 || resp.status_code >= 300) {
+            if (err.empty()) err = resp.error.empty() ? ("HTTP " + std::to_string(resp.status_code)) : resp.error;
+            return false;
+        }
+
+        ::lseek(wfd.get(), 0, SEEK_SET);
+        auto dst_full = join_vpath(dst_dir, fname);
+        if (!dst_full) { err = "Invalid destination path"; return false; }
+
+        UploadStream up;
+        up.filename = fname;
+        up.size = downloaded;
+        up.mime_type = std::string(guess_mime_type(fname));
+        up.read_fn = [&](char* buf, size_t max_len) -> ssize_t {
+            if (self.cancel_flag.load()) return -1;
+            return ::read(wfd.get(), buf, max_len);
+        };
+        return vfs_.put_stream(*dst_full, up, err);
+    };
+
+    std::string id = t->rec.id;
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        if (all_tasks_.size() > 2000) clear_done_tasks_unlocked("");
+        all_tasks_[id] = t;
+        queue_.push_back(std::move(t));
+    }
+    cv_.notify_one();
+    return id;
+}
+
+std::vector<TaskRecord> TaskManager::list_tasks(std::string_view type_filter, bool done_only) const {
+    std::lock_guard<std::mutex> lk(mu_);
+    std::vector<TaskRecord> out;
+    for (const auto& [_, t] : all_tasks_) {
+        if (!type_filter.empty() && t->rec.type != type_filter) continue;
+        bool is_done = (t->rec.state == "succeeded" || t->rec.state == "failed" || t->rec.state == "canceled");
+        if (done_only != is_done) continue;
+        out.push_back(t->rec);
+    }
+    return out;
+}
+
+bool TaskManager::cancel_task(std::string_view task_id) {
+    std::lock_guard<std::mutex> lk(mu_);
+    auto it = all_tasks_.find(std::string(task_id));
+    if (it == all_tasks_.end()) return false;
+    it->second->cancel_flag.store(true, std::memory_order_relaxed);
+    if (it->second->rec.state == "pending") {
+        it->second->rec.state = "canceled";
+        it->second->rec.status_text = "canceled";
+    }
+    return true;
+}
+
+void TaskManager::clear_done_tasks(std::string_view type_filter) {
+    std::lock_guard<std::mutex> lk(mu_);
+    clear_done_tasks_unlocked(type_filter);
+}
+
+void TaskManager::clear_done_tasks_unlocked(std::string_view type_filter) {
+    for (auto it = all_tasks_.begin(); it != all_tasks_.end();) {
+        const auto& st = it->second->rec.state;
+        bool is_done = (st == "succeeded" || st == "failed" || st == "canceled");
+        if (is_done && (type_filter.empty() || it->second->rec.type == type_filter)) {
+            it = all_tasks_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+} // namespace alist

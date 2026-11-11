@@ -1,19 +1,22 @@
 #!/bin/sh
+set -eu
 
-umask ${UMASK}
+PUID="${PUID:-0}"
+PGID="${PGID:-0}"
+UMASK="${UMASK:-022}"
 
-if [ "$1" = "version" ]; then
-  ./alist version
-else
-  if [ "$RUN_ARIA2" = "true" ]; then
-    chown -R ${PUID}:${PGID} /opt/aria2/
-    exec su-exec ${PUID}:${PGID} nohup aria2c \
-      --enable-rpc \
-      --rpc-allow-origin-all \
-      --conf-path=/opt/aria2/.aria2/aria2.conf \
-      >/dev/null 2>&1 &
-  fi
+umask "$UMASK"
+mkdir -p /opt/alist/data
 
-  chown -R ${PUID}:${PGID} /opt/alist/
-  exec su-exec ${PUID}:${PGID} ./alist server --no-prefix
+if [ "$PUID" != "0" ] || [ "$PGID" != "0" ]; then
+    if ! getent group alist >/dev/null 2>&1; then
+        groupadd -o -g "$PGID" alist
+    fi
+    if ! id -u alist >/dev/null 2>&1; then
+        useradd -o -u "$PUID" -g "$PGID" -d /opt/alist -s /usr/sbin/nologin alist
+    fi
+    chown -R "${PUID}:${PGID}" /opt/alist/data
+    exec gosu alist /opt/alist/alist server --data /opt/alist/data "$@"
 fi
+
+exec /opt/alist/alist server --data /opt/alist/data "$@"
