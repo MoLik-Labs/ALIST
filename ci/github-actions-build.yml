@@ -1,0 +1,36 @@
+name: Build, Security Sanitizers & Benchmarks
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["main", "BETA"]
+
+jobs:
+  verify:
+    name: C++20 Release + ASan/UBSan + TSan + Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install native C++20 dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ make cmake libsqlite3-dev libcurl4-openssl-dev libssl-dev zlib1g-dev
+
+      - name: Build hardened LTO release binary
+        run: |
+          make -j"$(nproc)" release
+          ls -lh ./alist
+          ./alist version
+
+      - name: Run AddressSanitizer + LeakSanitizer + UBSan suite
+        run: make -j"$(nproc)" asan
+
+      - name: Run ThreadSanitizer concurrency suite
+        run: make -j"$(nproc)" tsan
+
+      - name: Run performance & footprint benchmarks
+        run: make -j"$(nproc)" bench

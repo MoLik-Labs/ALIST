@@ -1,34 +1,26 @@
-.idea/
-.DS_Store
-output/
-/dist/
+# Build outputs & object files
+/bin/
+/build/
+/*.o
+/*.d
+/alist
+/alist_asan
+/alist_tsan
+/test_runner
+/test_runner_asan
+/test_runner_tsan
+/bench_runner
 
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-*.db
-*.bin
-
-# Test binary, built with `go test -c`
-*.test
-
-# Output of the go coverage tool, specifically when used with LiteIDE
-*.out
-
-# Dependency directories (remove the comment below to include it)
-# vendor/
-/bin/*
-*.json
-/build
+# Runtime data & logs
 /data/
-/tmp/
-/log/
-/lang/
-/daemon/
-/public/dist/*
-!/public/dist/README.md
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.log
 
-.VSCodeCounter
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+compile_commands.json
