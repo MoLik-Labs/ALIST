@@ -22,6 +22,7 @@ public:
     // Main HTTP dispatcher
     void dispatch(HttpRequest& req, HttpResponse& resp);
 
+    void set_server(const HttpServer* srv) noexcept { server_ = srv; }
     TokenBucket& download_limiter() noexcept { return down_limiter_; }
 
 private:
@@ -48,6 +49,8 @@ private:
     TokenBucket down_limiter_;
     TokenBucket up_limiter_;
     WebDavServer webdav_;
+    const HttpServer* server_ = nullptr;
+    int64_t boot_unix_ = 0;
 
     std::string precompressed_ui_gzip_;
 };

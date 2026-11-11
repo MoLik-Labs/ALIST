@@ -12,10 +12,10 @@ inline constexpr std::string_view kEmbeddedWebUiHtml = R"HTML(<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AList-Core · High-Performance Multi-Storage</title>
+<title>AList @nggkhaiz · Storage</title>
 <style>
-:root{--bg:#0b1020;--panel:#121a30;--panel2:#18223f;--border:#26345c;--text:#eef2ff;--muted:#94a3b8;--accent:#6366f1;--accent2:#4f46e5;--ok:#10b981;--danger:#ef4444;--warn:#f59e0b}
-[data-theme="light"]{--bg:#f8fafc;--panel:#ffffff;--panel2:#f1f5f9;--border:#e2e8f0;--text:#0f172a;--muted:#64748b;--accent:#4f46e5;--accent2:#4338ca}
+:root{color-scheme:dark;--bg:#090a0b;--panel:#111315;--panel2:#191c1f;--border:#2a2e32;--text:#e8eaec;--muted:#92999f;--accent:#d2d7db;--accent2:#fff;--ok:#6dbf8b;--danger:#e27676;--warn:#d5ae63}
+[data-theme="light"]{color-scheme:light;--bg:#f4f5f5;--panel:#fff;--panel2:#f0f1f1;--border:#d9dcde;--text:#17191a;--muted:#656b70;--accent:#30363a;--accent2:#111;--ok:#267a47;--danger:#bd3434;--warn:#936b19}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.5}
 a{color:inherit;text-decoration:none}
@@ -72,9 +72,9 @@ pre.code-view{background:var(--bg);padding:16px;border-radius:10px;overflow:auto
 <body>
 <header class="topbar">
   <div class="brand" onclick="navTo('/')">
-    <span>⚡</span>
-    <span id="siteTitle">AList-Core</span>
-    <span class="badge">C++20 Zero-Copy</span>
+    <span aria-hidden="true" style="width:9px;height:9px;background:var(--accent);border-radius:2px;display:inline-block"></span>
+    <span id="siteTitle">AList · @nggkhaiz</span>
+    <span class="badge">v4.1</span>
   </div>
   <div class="actions">
     <button class="btn" onclick="openSearch()">🔍 Search</button>

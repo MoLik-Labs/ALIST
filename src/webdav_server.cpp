@@ -98,7 +98,7 @@ WebDavServer::WebDavServer(VfsEngine& vfs, BruteForceProtector& bf, TokenBucket&
 std::optional<UserRecord> WebDavServer::authenticate_basic_or_bearer(const HttpRequest& req, HttpResponse& resp) {
     auto challenge = [&]() -> std::optional<UserRecord> {
         resp.status = 401;
-        resp.headers["WWW-Authenticate"] = R"(Basic realm="AList-Core WebDAV")";
+        resp.headers["WWW-Authenticate"] = R"(Basic realm="AList @nggkhaiz WebDAV")";
         return std::nullopt;
     };
 
@@ -129,20 +129,37 @@ std::optional<UserRecord> WebDavServer::authenticate_basic_or_bearer(const HttpR
         std::string uname = dec->substr(0, colon);
         std::string pwd   = dec->substr(colon + 1);
         auto u = vfs_.db().get_user_by_name(uname);
-        if (!u || u->disabled || !verify_password_pbkdf2(pwd, u->password_hash)) {
+        if (!u || u->is_guest() || u->disabled || !verify_password_pbkdf2(pwd, u->password_hash)) {
             bf_.record_failure("dav:" + req.remote_ip);
             return challenge();
+        }
+        // Security: Never allow WebDAV Basic Auth to bypass 2FA when TOTP is enabled on the account!
+        if (!u->otp_secret.empty()) {
+            std::string otp = req.header("x-otp-code");
+            int64_t step = -1;
+            if (otp.empty() || !totp_verify(u->otp_secret, otp, unix_now(), &step) ||
+                !vfs_.db().verify_and_advance_otp_step(u->id, step)) {
+                bf_.record_failure("dav:" + req.remote_ip);
+                resp.headers["X-2FA-Required"] = "true";
+                return challenge();
+            }
         }
         bf_.record_success("dav:" + req.remote_ip);
         return u;
     }
 
+    // Strip optional RFC 6750 "Bearer " prefix
+    std::string_view tok = trim_ascii(auth);
+    if (tok.size() > 7 && (tok.starts_with("Bearer ") || tok.starts_with("bearer "))) {
+        tok = trim_ascii(tok.substr(7));
+    }
+
     // JWT or Admin static token
     std::string sys_tok = vfs_.db().get_setting("token", "");
-    if (!sys_tok.empty() && constant_time_equals(auth, sys_tok)) {
+    if (!sys_tok.empty() && constant_time_equals(tok, sys_tok)) {
         return vfs_.db().get_admin_user();
     }
-    auto claims = jwt_decode_hs256(auth, vfs_.config().jwt_secret);
+    auto claims = jwt_decode_hs256(tok, vfs_.config().jwt_secret);
     if (!claims || vfs_.db().is_token_jti_revoked(claims->jti)) {
         bf_.record_failure("dav:" + req.remote_ip);
         return challenge();

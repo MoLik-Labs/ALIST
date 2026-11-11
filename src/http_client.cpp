@@ -155,7 +155,7 @@ OutboundResponse HttpClient::perform(const OutboundRequest& req) {
     curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(req.timeout_ms));
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https,ftp,ftps,sftp");
     curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "AList-Core/4.0");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "AList-nggkhaiz/4.1");
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, req.insecure_tls ? 0L : 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, req.insecure_tls ? 0L : 2L);
 

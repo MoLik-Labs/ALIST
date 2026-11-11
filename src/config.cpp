@@ -74,6 +74,7 @@ bool AppConfig::load_or_create(const std::string& data_dir_override) {
             max_connections = static_cast<int>(j->get("max_connections").as_i64(max_connections));
             allow_private_net_outbound = j->get("allow_private_net_outbound").as_bool(allow_private_net_outbound);
             tls_insecure_skip_verify = j->get("tls_insecure_skip_verify").as_bool(tls_insecure_skip_verify);
+            trust_proxy = j->get("trust_proxy").as_bool(trust_proxy);
 
             const auto& sch = j->get("scheme");
             if (sch.is_object()) {
@@ -107,6 +108,7 @@ bool AppConfig::load_or_create(const std::string& data_dir_override) {
     token_expires_in = env_int_or("ALIST_TOKEN_EXPIRES_IN", token_expires_in);
     debug          = env_bool_or("ALIST_DEBUG", debug);
     allow_private_net_outbound = env_bool_or("ALIST_ALLOW_PRIVATE_NET", allow_private_net_outbound);
+    trust_proxy    = env_bool_or("ALIST_TRUST_PROXY", trust_proxy);
 
     std::filesystem::create_directories(temp_dir, ec);
     ::chmod(temp_dir.c_str(), 0700);
@@ -132,6 +134,7 @@ bool AppConfig::save(const std::string& config_path) const {
         {"max_connections",  max_connections},
         {"allow_private_net_outbound", allow_private_net_outbound},
         {"tls_insecure_skip_verify",   tls_insecure_skip_verify},
+        {"trust_proxy",                trust_proxy},
         {"scheme", JsonValue::object({
             {"address",   address},
             {"http_port", http_port},

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -16,8 +17,21 @@
 
 namespace alist {
 
-// High-concurrency 64-shard bounded LRU+TTL cache.
-// Stores immutable shared_ptr snapshots for collection values so readers never race with writers!
+struct TransparentStringHash {
+    using is_transparent = void;
+    [[nodiscard]] size_t operator()(std::string_view sv) const noexcept {
+        return std::hash<std::string_view>{}(sv);
+    }
+    [[nodiscard]] size_t operator()(const std::string& s) const noexcept {
+        return std::hash<std::string_view>{}(s);
+    }
+    [[nodiscard]] size_t operator()(const char* s) const noexcept {
+        return std::hash<std::string_view>{}(s);
+    }
+};
+
+// High-concurrency 64-shard bounded LRU+TTL cache with zero-allocation heterogeneous lookup.
+// Stores immutable shared_ptr snapshots for collection values so readers never race with writers.
 template <typename V, size_t Shards = 64>
 class ShardedLruCache {
 public:
@@ -28,14 +42,19 @@ public:
         auto& sh = shard_for(key);
         auto now = std::chrono::steady_clock::now();
         std::lock_guard<std::mutex> lk(sh.mu);
-        auto it = sh.index.find(std::string(key));
-        if (it == sh.index.end()) return std::nullopt;
+        auto it = sh.index.find(key);
+        if (it == sh.index.end()) {
+            misses_.fetch_add(1, std::memory_order_relaxed);
+            return std::nullopt;
+        }
         if (it->second->expires_at <= now) {
             sh.lru.erase(it->second);
             sh.index.erase(it);
+            misses_.fetch_add(1, std::memory_order_relaxed);
             return std::nullopt;
         }
         sh.lru.splice(sh.lru.begin(), sh.lru, it->second);
+        hits_.fetch_add(1, std::memory_order_relaxed);
         return it->second->value;
     }
 
@@ -43,9 +62,8 @@ public:
         if (ttl.count() <= 0) return;
         auto& sh = shard_for(key);
         auto exp = std::chrono::steady_clock::now() + ttl;
-        std::string k(key);
         std::lock_guard<std::mutex> lk(sh.mu);
-        auto it = sh.index.find(k);
+        auto it = sh.index.find(key);
         if (it != sh.index.end()) {
             it->second->value = std::move(value);
             it->second->expires_at = exp;
@@ -53,10 +71,10 @@ public:
             return;
         }
         if (sh.lru.size() >= max_per_shard_) {
-            const std::string& victim = sh.lru.back().key;
-            sh.index.erase(victim);
+            sh.index.erase(sh.lru.back().key);
             sh.lru.pop_back();
         }
+        std::string k(key);
         sh.lru.push_front(Node{k, std::move(value), exp});
         sh.index.emplace(std::move(k), sh.lru.begin());
     }
@@ -64,7 +82,7 @@ public:
     void erase(std::string_view key) {
         auto& sh = shard_for(key);
         std::lock_guard<std::mutex> lk(sh.mu);
-        auto it = sh.index.find(std::string(key));
+        auto it = sh.index.find(key);
         if (it != sh.index.end()) {
             sh.lru.erase(it->second);
             sh.index.erase(it);
@@ -78,7 +96,7 @@ public:
                 if (it->key == prefix ||
                     (it->key.size() > prefix.size() &&
                      it->key.starts_with(prefix) &&
-                     (prefix == "/" || it->key[prefix.size()] == '/'))) {
+                     (prefix == "/" || it->key[prefix.size()] == '/' || it->key[prefix.size()] == '\0'))) {
                     sh.index.erase(it->key);
                     it = sh.lru.erase(it);
                 } else {
@@ -96,6 +114,18 @@ public:
         }
     }
 
+    [[nodiscard]] size_t size() const {
+        size_t total = 0;
+        for (auto& sh : shards_) {
+            std::lock_guard<std::mutex> lk(sh.mu);
+            total += sh.lru.size();
+        }
+        return total;
+    }
+
+    [[nodiscard]] uint64_t hits() const noexcept { return hits_.load(std::memory_order_relaxed); }
+    [[nodiscard]] uint64_t misses() const noexcept { return misses_.load(std::memory_order_relaxed); }
+
 private:
     struct Node {
         std::string key;
@@ -103,9 +133,9 @@ private:
         std::chrono::steady_clock::time_point expires_at;
     };
     struct Shard {
-        std::mutex mu;
+        mutable std::mutex mu;
         std::list<Node> lru;
-        std::unordered_map<std::string, typename std::list<Node>::iterator> index;
+        std::unordered_map<std::string, typename std::list<Node>::iterator, TransparentStringHash, std::equal_to<>> index;
     };
 
     Shard& shard_for(std::string_view key) noexcept {
@@ -115,6 +145,8 @@ private:
 
     std::array<Shard, Shards> shards_;
     size_t max_per_shard_;
+    std::atomic<uint64_t> hits_{0};
+    std::atomic<uint64_t> misses_{0};
 };
 
 // Coalesces concurrent identical requests into a single in-flight execution (prevents cache stampede)
@@ -140,7 +172,6 @@ public:
 
         if (!is_leader) {
             if (call->owner == std::this_thread::get_id()) {
-                // Re-entrant cycle on same thread: return default R{} instead of self-deadlocking!
                 return R{};
             }
             std::unique_lock<std::mutex> clk(call->mu);

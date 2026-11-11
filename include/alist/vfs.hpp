@@ -88,7 +88,16 @@ public:
     const AppConfig& config() const noexcept { return cfg_; }
     Database& db() noexcept { return db_; }
 
+    [[nodiscard]] uint64_t cache_hits() const noexcept { return list_cache_.hits(); }
+    [[nodiscard]] uint64_t cache_misses() const noexcept { return list_cache_.misses(); }
+    [[nodiscard]] size_t cache_size() const { return list_cache_.size(); }
+    [[nodiscard]] size_t mounted_count() const {
+        std::shared_lock<std::shared_mutex> lk(mounts_mu_);
+        return mounts_.size();
+    }
+
 private:
+    mutable std::shared_mutex mounts_mu_;
     struct MountMatch {
         std::shared_ptr<MountedStorage> mounted;
         std::string subpath; // Canonical path inside driver
@@ -100,7 +109,6 @@ private:
     Database& db_;
     const AppConfig& cfg_;
 
-    std::shared_mutex mounts_mu_;
     std::map<std::string, std::shared_ptr<MountedStorage>> mounts_; // mount_path -> MountedStorage
     std::atomic<uint64_t> balance_rr_{0};
 

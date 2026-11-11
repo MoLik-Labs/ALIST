@@ -1,6 +1,6 @@
-# AList-Core (`v4.0.0-standalone`)
+# AList @nggkhaiz (`v4.1.0-nggkhaiz`)
 
-**AList-Core** is an independent, ground-up **C++20** standalone rewrite of AList engineered for minimal binary size, minimal RAM footprint, deterministic zero-GC latency, kernel zero-copy throughput, and defense-in-depth security.
+**AList @nggkhaiz** is an independent, ground-up **C++20** standalone rewrite of AList engineered for minimal binary size, minimal RAM footprint, deterministic zero-GC latency, kernel zero-copy throughput, and defense-in-depth security.
 
 ---
 
@@ -97,6 +97,12 @@ make -j"$(nproc)" bench
 ```bash
 docker compose up -d --build
 ```
+
+The image defaults to an unprivileged `alist` account (`PUID=10001`, `PGID=10001`). Keep `/opt/alist/data` on persistent storage; it contains the SQLite database, signing key, and configured storage metadata. Compose persists it at `./data`. Set `PUID`/`PGID` to match ownership requirements on the host. Do not publish the service directly to an untrusted network without TLS termination and appropriate access controls.
+
+### 4. Render
+
+Create a Render Blueprint from this repository and select `render.yaml`. It defines the Docker web service, `/ping` health check, and a persistent disk mounted at `/opt/alist/data`. The Blueprint uses Render's `PORT` value (the app binds to it automatically) and a paid plan because persistent disks are not available on free instances. Keep the disk attached: ephemeral instances without it will lose the database and signing key on replacement. Configure `ALIST_SITE_URL` for the public HTTPS URL if absolute links are needed; enable `ALIST_TRUST_PROXY` only when requests arrive through a proxy you control. The source and Compose deployment remain available independently of Render.
 
 ---
 

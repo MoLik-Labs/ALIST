@@ -1,0 +1,25 @@
+# Render Blueprint: deploy the standalone C++ service as a Docker web service.
+# Attach persistent storage at /opt/alist/data; SQLite data is not portable across
+# ephemeral instances without a disk. Configure a paid plan with disk support.
+services:
+  - type: web
+    name: alist-nggkhaiz
+    runtime: docker
+    plan: starter
+    region: singapore
+    healthCheckPath: /ping
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: PUID
+        value: "10001"
+      - key: PGID
+        value: "10001"
+      - key: UMASK
+        value: "027"
+      - key: TZ
+        value: UTC
+    disk:
+      name: alist-data
+      mountPath: /opt/alist/data
+      sizeGB: 1

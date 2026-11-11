@@ -3,7 +3,14 @@ set -eu
 
 PUID="${PUID:-0}"
 PGID="${PGID:-0}"
-UMASK="${UMASK:-022}"
+UMASK="${UMASK:-027}"
+
+case "$PUID:$PGID" in
+    *[!0-9:]*|:*|*:|*:*:*) echo "PUID and PGID must be non-negative integers" >&2; exit 64 ;;
+esac
+case "$UMASK" in
+    ''|*[!0-7]*) echo "UMASK must contain octal digits only" >&2; exit 64 ;;
+esac
 
 umask "$UMASK"
 mkdir -p /opt/alist/data
