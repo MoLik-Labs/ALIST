@@ -4,20 +4,23 @@
 
 ---
 
-## Why AList-Core? (Measured Footprint & Performance)
+## Performance Snapshot (Host-Specific)
 
-Benchmarked on a 2-vCPU Linux x86_64 instance (`g++ 12.2 -std=c++20 -O3 -flto -fPIE -pie -Wl,-z,relro,-z,now`):
+One recent `make -j2 bench` run in the development sandbox, using the release benchmark target, reported the following. These are reproducibility figures—not guaranteed production throughput, cross-project comparisons, or claims that each latest code change caused the measured values. Results depend on CPU, kernel, compiler, libraries, and load.
 
-| Metric | Legacy Go AList v3 | AList-Core (`v4.0.0-standalone`) | Improvement |
-| :--- | :--- | :--- | :--- |
-| **Stripped Standalone Binary** | ~130 MB | **879 KB** (includes embedded Web SPA) | **~148x smaller** |
-| **Cold Idle Memory (`VmRSS`)** | ~45–80 MB | **~6.9 MB** (`7,080 KB`, zero GC) | **~8–10x lower RAM** |
-| **Active Loaded Memory (`VmRSS`)** | ~180–400+ MB | **~20.7 MB** (10k FTS5 index + 512 MiB stream) | **~10x lower RAM** |
-| **Local File Download Path** | Userspace copy | **Linux `sendfile64()` kernel zero-copy** | **7,090 MiB/s (59.5 Gbps)** |
-| **HTTP/1.1 Keep-Alive `epoll`** | `net/http` goroutines | **Non-blocking `epoll` + `eventfd` pool** | **123,200+ req/s (2 vCPU)** |
-| **64-Shard VFS Cache** | Single mutex / shared slice | **64-shard LRU + `Singleflight` snapshots** | **9.27M lookups/s** |
-| **Crypt Stream Encryption** | Userspace stream | **OpenSSL 3 EVP AES-256-GCM (64 KiB O(1) seek)** | **4,368 MiB/s (4.37 GiB/s)** |
-| **Full-Text Search (10k files)** | Optional external / DB scan | **SQLite3 WAL + FTS5 (`unicode61` diacritics)** | **13,880+ queries/s (72 µs)** |
+| Metric | Measured result |
+| :--- | :--- |
+| Stripped standalone binary | 944 KB on this build |
+| Initial process RSS | 7.04 MB |
+| Loaded server RSS | 21.12 MB |
+| 64-shard cache lookups | 8.99 M ops/s |
+| AES-256-GCM encryption | 3,909 MiB/s |
+| HS256 JWT verification | 219,885 verifications/s |
+| SQLite FTS5, 10k files | 9,892 queries/s |
+| HTTP/1.1 keep-alive | 180,378 req/s |
+| `sendfile64()` stream | 8,455.9 MiB/s (70.93 Gbps) |
+
+For a fresh measurement on your host, run `make -j2 bench`.
 
 ---
 

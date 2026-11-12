@@ -32,11 +32,6 @@ LABEL org.opencontainers.image.title="AList @nggkhaiz" \
       org.opencontainers.image.source="https://github.com/NggKhaiz/ALIST" \
       org.opencontainers.image.version="v4.1.0-nggkhaiz"
 
-LABEL org.opencontainers.image.title="AList @nggkhaiz" \
-      org.opencontainers.image.authors="@nggkhaiz" \
-      org.opencontainers.image.source="https://github.com/NggKhaiz/ALIST" \
-      org.opencontainers.image.version="v4.1.0-nggkhaiz"
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     tzdata \

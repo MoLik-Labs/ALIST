@@ -13,6 +13,7 @@ inline constexpr std::string_view kEmbeddedWebUiHtml = R"HTML(<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AList @nggkhaiz · Storage</title>
+<link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAB00lEQVR4AeyVuy8EURTG1zMKBQUaJJ4FohcKBVqPQqGgEDoqQkFIaLwaOioaQYFWNBL8AUgIiZKIaISIxOt3kh13xtyxszP7Kmbz/XLuuffMmW/vzN5NDyX5ExhIyR345rWIJ7RXSskdUPYSMAp2INgB3Q6k8e55pYZrD0GnSyZbwSKdAUuBy6SAulU4hxYw64FkEOrAZs6vgRyaTsAtDEAGGHpjMAsVsAZfYJNXA/KIeul2AzOQC4bkFN0gqYRJeAVHeTHQSLczWIdiMOuEpB764A4iKhoDspV7dDwGeZ6EX10z6oAmuADXcmMgn27LcAXtYNYTyTDUwj5Erf8MZNNtBOQFGyJmgqF3BotQDivwAZ7kZKCbbvKNF4h5YNY2SRWMwjP4ks7AKR23oAz+6oAJOVD6idMe4TIlnYEGtWwbtTEz5RMuV9IZUKsJGAUGnHZAflabPIFOkJ+fHL1CFnkXyNon0bd0BpboWgo9ICef+UZibJd5WSshSu0L0a1stToDcvjcu+goNVJbTa0YeSQ6SdakRmotNToDlgIXiWGkiFo5wOaJR2HmiDJXSBSzUstQKRYGjG7yN7xDMgbNYcaJMkfQK5YG9HeIMBt3AxHuH/oBAAD//zKEaE0AAAAGSURBVAMAMcNrQerOH9kAAAAASUVORK5CYII=">
 <style>
 :root{color-scheme:dark;--bg:#090a0b;--panel:#111315;--panel2:#191c1f;--border:#2a2e32;--text:#e8eaec;--muted:#92999f;--accent:#d2d7db;--accent2:#fff;--ok:#6dbf8b;--danger:#e27676;--warn:#d5ae63}
 [data-theme="light"]{color-scheme:light;--bg:#f4f5f5;--panel:#fff;--panel2:#f0f1f1;--border:#d9dcde;--text:#17191a;--muted:#656b70;--accent:#30363a;--accent2:#111;--ok:#267a47;--danger:#bd3434;--warn:#936b19}
@@ -22,6 +23,8 @@ a{color:inherit;text-decoration:none}
 button,input,select,textarea{font:inherit;color:var(--text)}
 .topbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 24px;background:var(--panel);border-bottom:1px solid var(--border);backdrop-filter:blur(12px)}
 .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.1rem;cursor:pointer}
+.brand-logo{width:30px;height:30px;object-fit:contain;filter:invert(1)}
+[data-theme="light"] .brand-logo{filter:none}
 .badge{font-size:.7rem;padding:2px 8px;border-radius:99px;background:rgba(99,102,241,.18);color:#818cf8;border:1px solid rgba(99,102,241,.35);font-weight:600}
 .actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .btn{padding:7px 13px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);cursor:pointer;font-size:.86rem;font-weight:500;transition:.15s;display:inline-flex;align-items:center;gap:6px}
@@ -72,9 +75,9 @@ pre.code-view{background:var(--bg);padding:16px;border-radius:10px;overflow:auto
 <body>
 <header class="topbar">
   <div class="brand" onclick="navTo('/')">
-    <span aria-hidden="true" style="width:9px;height:9px;background:var(--accent);border-radius:2px;display:inline-block"></span>
-    <span id="siteTitle">AList · @nggkhaiz</span>
-    <span class="badge">v4.1</span>
+    <img class="brand-logo" alt="@nggkhaiz logo" width="30" height="30" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAB00lEQVR4AeyVuy8EURTG1zMKBQUaJJ4FohcKBVqPQqGgEDoqQkFIaLwaOioaQYFWNBL8AUgIiZKIaISIxOt3kh13xtyxszP7Kmbz/XLuuffMmW/vzN5NDyX5ExhIyR345rWIJ7RXSskdUPYSMAp2INgB3Q6k8e55pYZrD0GnSyZbwSKdAUuBy6SAulU4hxYw64FkEOrAZs6vgRyaTsAtDEAGGHpjMAsVsAZfYJNXA/KIeul2AzOQC4bkFN0gqYRJeAVHeTHQSLczWIdiMOuEpB764A4iKhoDspV7dDwGeZ6EX10z6oAmuADXcmMgn27LcAXtYNYTyTDUwj5Erf8MZNNtBOQFGyJmgqF3BotQDivwAZ7kZKCbbvKNF4h5YNY2SRWMwjP4ks7AKR23oAz+6oAJOVD6idMe4TIlnYEGtWwbtTEz5RMuV9IZUKsJGAUGnHZAflabPIFOkJ+fHL1CFnkXyNon0bd0BpboWgo9ICef+UZibJd5WSshSu0L0a1stToDcvjcu+goNVJbTa0YeSQ6SdakRmotNToDlgIXiWGkiFo5wOaJR2HmiDJXSBSzUstQKRYGjG7yN7xDMgbNYcaJMkfQK5YG9HeIMBt3AxHuH/oBAAD//zKEaE0AAAAGSURBVAMAMcNrQerOH9kAAAAASUVORK5CYII=">
+    <span id="siteTitle">AList @nggkhaiz</span>
+    <span class="badge">v4.1.0</span>
   </div>
   <div class="actions">
     <button class="btn" onclick="openSearch()">🔍 Search</button>
@@ -188,11 +191,34 @@ function toast(msg) {
   clearTimeout(toast._t);
   toast._t = setTimeout(() => el.style.display = 'none', 3200);
 }
+let modalResultResolver = null;
 function openModal(html) {
+  if (modalResultResolver) closeModal(null);
   document.getElementById('modalContent').innerHTML = html;
   document.getElementById('modalBg').classList.add('open');
 }
-function closeModal() { document.getElementById('modalBg').classList.remove('open'); }
+function closeModal(result = null) {
+  document.getElementById('modalBg').classList.remove('open');
+  const resolve = modalResultResolver;
+  modalResultResolver = null;
+  if (resolve) resolve(result);
+}
+function askText(title, label, initial = '', placeholder = '') {
+  return new Promise(resolve => {
+    openModal(`<h3>${esc(title)}</h3><div class="field"><label for="modalTextValue">${esc(label)}</label><input class="input" id="modalTextValue" value="${esc(initial)}" placeholder="${esc(placeholder)}"></div><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" onclick="closeModal(null)">Cancel</button><button class="btn btn-primary" onclick="closeModal(document.getElementById('modalTextValue').value)">Continue</button></div>`);
+    modalResultResolver = resolve;
+    const input = document.getElementById('modalTextValue');
+    input.onkeydown = event => { if (event.key === 'Enter') closeModal(input.value); };
+    input.focus();
+    input.select();
+  });
+}
+function askConfirm(title, message, action = 'Confirm') {
+  return new Promise(resolve => {
+    openModal(`<h3>${esc(title)}</h3><p style="margin:0 0 20px;color:var(--muted)">${esc(message)}</p><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" onclick="closeModal(false)">Cancel</button><button class="btn btn-danger" onclick="closeModal(true)">${esc(action)}</button></div>`);
+    modalResultResolver = resolve;
+  });
+}
 function toggleTheme() {
   const cur = document.documentElement.getAttribute('data-theme');
   const next = cur === 'light' ? 'dark' : 'light';
@@ -216,7 +242,7 @@ async function initApp() {
   const pub = await api('/api/public/settings');
   if (pub.code === 200 && pub.data && pub.data.site_title) {
     document.getElementById('siteTitle').textContent = pub.data.site_title;
-    document.title = pub.data.site_title + ' · AList-Core';
+    document.title = pub.data.site_title + ' · AList @nggkhaiz';
   }
   if (state.shareId) {
     document.getElementById('explorerView').style.display = 'none';
@@ -248,7 +274,7 @@ async function refreshMe() {
 }
 
 function openLogin() {
-  openModal(`<h3>Sign In to AList-Core</h3>
+  openModal(`<h3>Sign In to AList @nggkhaiz</h3>
     <div class="field"><label>Username</label><input class="input" id="lgUser" value="admin"></div>
     <div class="field"><label>Password</label><input class="input" type="password" id="lgPass" onkeydown="if(event.key==='Enter')submitLogin()"></div>
     <div class="field"><label>2FA OTP Code (if enabled)</label><input class="input" id="lgOtp" placeholder="Optional 6-digit TOTP"></div>
@@ -460,27 +486,27 @@ async function uploadFiles(files) {
 }
 
 async function promptMkdir() {
-  const name = prompt('New folder name:');
+  const name = (await askText('Create folder', 'Folder name')).trim();
   if (!name) return;
   const r = await api('/api/fs/mkdir', {method:'POST', json:{path: joinPath(state.path, name)}});
   toast(r.code === 200 ? '✅ Folder created' : ('❌ ' + r.message));
   if (r.code === 200) loadPath(state.path, true);
 }
 async function promptRename(fullPath, oldName) {
-  const name = prompt('Rename to:', oldName);
+  const name = (await askText('Rename item', 'New name', oldName)).trim();
   if (!name || name === oldName) return;
   const r = await api('/api/fs/rename', {method:'POST', json:{path: fullPath, name}});
   toast(r.code === 200 ? '✅ Renamed' : ('❌ ' + r.message));
   if (r.code === 200) loadPath(state.path, true);
 }
 async function confirmDelete(fullPath, name) {
-  if (!confirm(`Delete "${name}" permanently?`)) return;
+  if (!await askConfirm('Delete item', `Delete "${name}" permanently?`, 'Delete')) return;
   const r = await api('/api/fs/remove', {method:'POST', json:{dir: state.path, names:[name]}});
   toast(r.code === 200 ? '🗑 Deleted' : ('❌ ' + r.message));
   if (r.code === 200) loadPath(state.path, true);
 }
 async function promptOfflineDl() {
-  const url = prompt('Enter HTTP/HTTPS file URL for background download into ' + state.path + ':');
+  const url = (await askText('Queue offline download', 'HTTP or HTTPS URL', '', 'https://example.com/file')).trim();
   if (!url) return;
   const r = await api('/api/fs/add_offline_download', {method:'POST', json:{path: state.path, urls:[url]}});
   toast(r.code === 200 ? '⚡ Offline download task queued!' : ('❌ ' + r.message));
@@ -684,7 +710,7 @@ async function saveStorage() {
 }
 
 async function delStorage(id) {
-  if (!confirm('Unmount and delete this storage?')) return;
+  if (!await askConfirm('Remove storage', 'Unmount and delete this storage configuration?', 'Remove storage')) return;
   await api('/api/admin/storage/delete?id=' + id, {method:'POST'});
   loadAdminStorages();
 }
@@ -811,7 +837,7 @@ async function loadAdminSettings() {
   document.getElementById('adminPanelBody').innerHTML = `<div class="grid-2">
     <div>
       <h3 style="margin-bottom:12px">Site & Security Settings</h3>
-      <div class="field"><label>Site Title</label><input class="input" id="stTitle" value="${esc(m.site_title||'AList-Core')}"></div>
+      <div class="field"><label>Site Title</label><input class="input" id="stTitle" value="${esc(m.site_title||'AList · @nggkhaiz')}"></div>
       <div class="field"><label>Force Sign All Download URLs</label><select class="input" id="stSignAll"><option value="false" ${m.sign_all==='false'?'selected':''}>false</option><option value="true" ${m.sign_all==='true'?'selected':''}>true</option></select></div>
       <div class="field"><label>Max Active Devices Per User (0 = Unlimited)</label><input class="input" type="number" id="stMaxDev" value="${esc(m.max_devices||'0')}"></div>
       <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
