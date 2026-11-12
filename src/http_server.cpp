@@ -8,6 +8,7 @@
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
+#include <limits>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/epoll.h>
@@ -78,6 +79,23 @@ namespace {
 
 constexpr size_t kMaxHeaderBytes        = 32768;
 constexpr size_t kMaxBufferedBodyBytes  = 8 * 1024 * 1024; // 8 MiB for JSON/XML control plane
+constexpr size_t kMaxChunkTrailerBytes  = 4096;
+
+bool parse_chunk_size(std::string_view text, size_t& result) noexcept {
+    if (text.empty()) return false;
+    size_t value = 0;
+    for (unsigned char ch : text) {
+        size_t digit;
+        if (ch >= '0' && ch <= '9') digit = ch - '0';
+        else if (ch >= 'a' && ch <= 'f') digit = ch - 'a' + 10;
+        else if (ch >= 'A' && ch <= 'F') digit = ch - 'A' + 10;
+        else return false;
+        if (value > (std::numeric_limits<size_t>::max() - digit) / 16) return false;
+        value = value * 16 + digit;
+    }
+    result = value;
+    return true;
+}
 
 const char* default_reason_phrase(int code) noexcept {
     switch (code) {
@@ -210,6 +228,18 @@ private:
         }
     }
 };
+
+bool drain_chunk_trailers(SocketReader& reader) {
+    size_t total = 0;
+    while (total < kMaxChunkTrailerBytes) {
+        std::string line;
+        if (!reader.read_until("\r\n", line, kMaxChunkTrailerBytes - total)) return false;
+        total += line.size();
+        if (line == "\r\n") return true;
+        if (line.size() < 2 || line.substr(line.size() - 2) != "\r\n") return false;
+    }
+    return false;
+}
 
 void parse_query_map(std::string_view q, std::map<std::string, std::string>& out) {
     for (auto pair_sv : split_sv(q, '&', true)) {
@@ -515,10 +545,8 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
             ::setsockopt(fd.get(), SOL_SOCKET, SO_RCVTIMEO, &up_tv, sizeof(up_tv));
 
             if (req.is_chunked) {
-                size_t chunk_rem = 0;
-                bool chunk_eof = false;
                 body_fully_drained = false;
-                req.stream_body = [&](char* dst, size_t max_len) -> ssize_t {
+                req.stream_body = [&, chunk_rem = size_t{0}, chunk_eof = false](char* dst, size_t max_len) mutable -> ssize_t {
                     if (chunk_eof) return 0;
                     if (chunk_rem == 0) {
                         std::string sz_line;
@@ -530,16 +558,9 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
                         sv = trim_ascii(sv);
                         if (sv.empty()) return -1;
                         size_t csz = 0;
-                        for (char ch : sv) {
-                            csz <<= 4;
-                            if (ch >= '0' && ch <= '9') csz |= static_cast<size_t>(ch - '0');
-                            else if (ch >= 'a' && ch <= 'f') csz |= static_cast<size_t>(ch - 'a' + 10);
-                            else if (ch >= 'A' && ch <= 'F') csz |= static_cast<size_t>(ch - 'A' + 10);
-                            else return -1;
-                        }
+                        if (!parse_chunk_size(sv, csz)) return -1;
                         if (csz == 0) {
-                            std::string trl;
-                            reader.read_until("\r\n", trl, 4096);
+                            if (!drain_chunk_trailers(reader)) return -1;
                             chunk_eof = true;
                             body_fully_drained = true;
                             return 0;
@@ -581,18 +602,12 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
                     auto semi = sv.find(';');
                     if (semi != std::string_view::npos) sv = sv.substr(0, semi);
                     size_t csz = 0;
-                    bool ok_hex = !sv.empty();
-                    for (char ch : sv) {
-                        csz <<= 4;
-                        if (ch >= '0' && ch <= '9') csz |= static_cast<size_t>(ch - '0');
-                        else if (ch >= 'a' && ch <= 'f') csz |= static_cast<size_t>(ch - 'a' + 10);
-                        else if (ch >= 'A' && ch <= 'F') csz |= static_cast<size_t>(ch - 'A' + 10);
-                        else { ok_hex = false; break; }
+                    if (!parse_chunk_size(sv, csz) || csz > kMaxBufferedBodyBytes - req.body.size()) {
+                        body_fully_drained = false;
+                        break;
                     }
-                    if (!ok_hex || req.body.size() + csz > kMaxBufferedBodyBytes) { body_fully_drained = false; break; }
                     if (csz == 0) {
-                        std::string trl;
-                        reader.read_until("\r\n", trl, 4096);
+                        if (!drain_chunk_trailers(reader)) body_fully_drained = false;
                         break;
                     }
                     size_t old_sz = req.body.size();
