@@ -6,15 +6,22 @@
 #include "alist/version.hpp"
 #include "alist/web_ui.hpp"
 
+#include <algorithm>
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <thread>
 #include <unistd.h>
 
 namespace alist {
 
 namespace {
+
+int bounded_json_int(const JsonValue& value, int fallback, int min_value, int max_value) {
+    const int64_t raw = value.as_i64(fallback);
+    return static_cast<int>(std::clamp<int64_t>(raw, min_value, max_value));
+}
 
 struct ProcTelemetry {
     int64_t rss_bytes = 0;
@@ -679,8 +686,8 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
         std::string req_p = body.get("path").as_str(req.query_param("path", "/"));
         std::string pw    = body.get("password").as_str(req.header("password"));
         bool refresh      = body.get("refresh").as_bool(false);
-        int page          = static_cast<int>(body.get("page").as_i64(1));
-        int per_page      = static_cast<int>(body.get("per_page").as_i64(0));
+        int page          = bounded_json_int(body.get("page"), 1, 1, std::numeric_limits<int>::max());
+        int per_page      = bounded_json_int(body.get("per_page"), 0, 0, 500);
 
         auto gvpath = vfs_.resolve_user_path(user, req_p);
         if (!gvpath) { json_err(resp, 403, "Invalid path"); return; }
@@ -697,9 +704,13 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
 
         int64_t total = static_cast<int64_t>(filtered.size());
         size_t start = 0, end = filtered.size();
-        if (per_page > 0 && page >= 1) {
-            start = std::min<size_t>(filtered.size(), static_cast<size_t>(page - 1) * static_cast<size_t>(per_page));
-            end   = std::min<size_t>(filtered.size(), start + static_cast<size_t>(per_page));
+        if (per_page > 0) {
+            const size_t page_index = static_cast<size_t>(page - 1);
+            const size_t page_size = static_cast<size_t>(per_page);
+            start = (page_index > filtered.size() / page_size)
+                        ? filtered.size()
+                        : std::min(filtered.size(), page_index * page_size);
+            end = start + std::min(page_size, filtered.size() - start);
         }
         JsonValue arr = JsonValue::array();
         for (size_t i = start; i < end; ++i) arr.push_back(filtered[i]->to_json());
@@ -742,9 +753,9 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
         auto body = parse_body_or_empty(req);
         std::string parent_req = body.get("parent").as_str("/");
         std::string keywords   = body.get("keywords").as_str();
-        int scope              = static_cast<int>(body.get("scope").as_i64(0));
-        int page               = static_cast<int>(body.get("page").as_i64(1));
-        int per_page           = static_cast<int>(body.get("per_page").as_i64(50));
+        int scope              = bounded_json_int(body.get("scope"), 0, 0, 2);
+        int page               = bounded_json_int(body.get("page"), 1, 1, std::numeric_limits<int>::max());
+        int per_page           = bounded_json_int(body.get("per_page"), 50, 1, 500);
 
         auto gparent = vfs_.resolve_user_path(user, parent_req);
         if (!gparent || !vfs_.can_read_path(user, *gparent, body.get("password").as_str())) {

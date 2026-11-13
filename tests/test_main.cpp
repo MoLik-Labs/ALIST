@@ -26,6 +26,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -398,6 +399,8 @@ void test_database_vault_and_fts5() {
     db.index_directory_entries("/docs", {f1, f2});
     auto [hits, total] = db.search_files("architecture", "/docs", 0, 1, 20);
     CHECK(total == 1 && hits.size() == 1 && hits[0].name == "architecture_spec_2026.pdf");
+    auto [far_hits, far_total] = db.search_files("architecture", "/docs", 0, std::numeric_limits<int>::max(), 500);
+    CHECK(far_total == 1 && far_hits.empty());
     db.close();
 }
 
@@ -664,6 +667,14 @@ void test_live_http_api_webdav_and_concurrency() {
     CHECK(login_json && login_json->get("code").as_i64() == 200);
     std::string admin_jwt = login_json->get("data").get("token").as_str();
     CHECK(!admin_jwt.empty());
+
+    std::string huge_page_body = R"({"path":"/local","page":9223372036854775807,"per_page":9223372036854775807})";
+    auto huge_page = raw_http_call(port,
+        "POST /api/fs/list HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + admin_jwt +
+        "\r\nContent-Length: " + std::to_string(huge_page_body.size()) + "\r\nConnection: close\r\n\r\n" + huge_page_body);
+    auto huge_page_json = JsonValue::parse(huge_page.body);
+    CHECK(huge_page_json && huge_page_json->get("code").as_i64() == 200 &&
+          huge_page_json->get("data").get("content").as_array().empty());
 
     // The streaming chunk parser must reject overflowing lengths and leave no partial file.
     auto oversized_upload = raw_http_call(port,

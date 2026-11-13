@@ -1219,7 +1219,7 @@ std::pair<std::vector<SearchHit>, int64_t> Database::search_files(
     std::string clean_scope = clean_vpath(scope_parent).value_or("/");
     if (page < 1) page = 1;
     if (per_page < 1 || per_page > 500) per_page = 50;
-    int offset = (page - 1) * per_page;
+    const int64_t offset = (static_cast<int64_t>(page) - 1) * static_cast<int64_t>(per_page);
 
     std::lock_guard<std::recursive_mutex> lk(mu_);
     Stmt st(db_, "SELECT parent_path, name, is_dir, size, file_type FROM x_search_fts "
@@ -1244,8 +1244,11 @@ std::pair<std::vector<SearchHit>, int64_t> Database::search_files(
     }
 
     int64_t total = static_cast<int64_t>(filtered.size());
-    for (int i = offset; i < static_cast<int>(filtered.size()) && i < offset + per_page; ++i) {
-        hits.push_back(std::move(filtered[static_cast<size_t>(i)]));
+    if (offset < total) {
+        const size_t begin = static_cast<size_t>(offset);
+        const size_t end = begin + std::min(static_cast<size_t>(per_page), filtered.size() - begin);
+        hits.reserve(end - begin);
+        for (size_t i = begin; i < end; ++i) hits.push_back(std::move(filtered[i]));
     }
     return {std::move(hits), total};
 }
