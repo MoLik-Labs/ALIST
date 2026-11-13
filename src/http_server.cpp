@@ -489,8 +489,11 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
                 if (!cl_opt || *cl_opt < 0) { malformed_hdr = true; break; }
                 req.content_length = *cl_opt;
             } else if (key == "transfer-encoding") {
+                if (has_te) { malformed_hdr = true; break; } // Reject duplicate framing headers.
                 has_te = true;
-                if (to_lower_ascii(val).find("chunked") != std::string::npos) {
+                // This server implements only a single chunked coding; accepting a substring
+                // (e.g. "notchunked" or "gzip, chunked") creates parser differentials.
+                if (iequals_ascii(trim_ascii(val), "chunked")) {
                     req.is_chunked = true;
                 } else {
                     malformed_hdr = true;

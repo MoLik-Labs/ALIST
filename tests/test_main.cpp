@@ -620,6 +620,13 @@ void test_live_http_api_webdav_and_concurrency() {
         "POST /api/fs/list HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 4\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n0\r\n\r\n");
     CHECK(smuggle.status == 400);
 
+    auto invalid_te = raw_http_call(port,
+        "POST /api/fs/list HTTP/1.1\r\nHost: 127.0.0.1\r\nTransfer-Encoding: notchunked\r\nConnection: close\r\n\r\n0\r\n\r\n");
+    CHECK(invalid_te.status == 400);
+    auto duplicate_te = raw_http_call(port,
+        "POST /api/fs/list HTTP/1.1\r\nHost: 127.0.0.1\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n0\r\n\r\n");
+    CHECK(duplicate_te.status == 400);
+
     // Overflow-sized chunk lengths must fail closed rather than wrap size_t.
     auto oversized_chunk = raw_http_call(port,
         "POST /api/fs/list HTTP/1.1\r\nHost: 127.0.0.1\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\nFFFFFFFFFFFFFFFFFFFFFFFF\r\n");
