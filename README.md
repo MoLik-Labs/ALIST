@@ -37,7 +37,7 @@ For a fresh measurement on your host, run `make -j2 bench`.
    - **RFC 4918 WebDAV Server** (`/dav/*`: `OPTIONS`, `PROPFIND`, `PROPPATCH`, `GET`, `HEAD`, streaming `PUT`, `MKCOL`, `DELETE`, `COPY`, `MOVE`, `LOCK`, `UNLOCK`).
    - **Signed Direct & Proxy Streaming** (`/d/*`, `/p/*`, `/ad/*` ZIP single-entry extraction) with RFC 7233 `Range` (`206 Partial Content` / `416`), `ETag` (`304`), and token-bucket rate limiting.
    - **Public Link Sharing** (`/s/:id`, `/sd/:id`, `/sp/:id`) with PBKDF2 passwords, expiration timestamps, and atomic SQLite `max_downloads` quota enforcement.
-   - **Embedded Zero-CDN Single-Page Web UI** (`< 30 KB` pre-gzipped in binary): dark/light mode, breadcrumbs, video/audio/image/markdown/code previews, ZIP archive browser, FTS5 search modal, share manager, 2FA setup, and full Admin Console.
+   - **Embedded Zero-CDN Single-Page Web UI**: dark/light mode, breadcrumbs, video/audio/image/markdown/code previews, ZIP archive browser, FTS5 search modal, share manager, 2FA setup, and full Admin Console.
 
 ---
 

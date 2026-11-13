@@ -1,4 +1,4 @@
-name: Build, Security Sanitizers & Benchmarks
+name: AList @nggkhaiz — Build, Security & Benchmarks
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
 
 jobs:
   verify:
-    name: C++20 Release + ASan/UBSan + TSan + Benchmarks
+    name: AList @nggkhaiz C++20 Release + ASan/UBSan + TSan + Benchmarks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

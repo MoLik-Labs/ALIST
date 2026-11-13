@@ -4,7 +4,7 @@
 
 namespace alist {
 
-// Self-contained, zero-CDN, modern responsive Single-Page Application (<30 KB raw, ~8 KB gzipped!).
+// Self-contained, zero-CDN responsive Single-Page Application embedded directly in the binary.
 // Supports File Explorer, Breadcrumbs, Instant FTS5 Search, Streaming Upload, Video/Audio/Image/Text/ZIP Preview,
 // Public Share Links (/s/:share_id), 2FA, and Full Admin Console (11 Drivers, Users, Roles, Metas, Shares, Tasks, Settings).
 inline constexpr std::string_view kEmbeddedWebUiHtml = R"HTML(<!DOCTYPE html>
