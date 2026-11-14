@@ -48,7 +48,14 @@ tr:last-child td{border-bottom:none}
 tbody tr{transition:background .12s;cursor:pointer}
 tbody tr:hover{background:var(--panel2)}
 .fname{display:flex;align-items:center;gap:10px;font-weight:500;word-break:break-all}
-.ficon{width:26px;text-align:center;font-size:1.1rem;flex-shrink:0}
+.entry-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;padding:14px}
+.entry-tile{min-height:120px;padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--panel2);display:flex;flex-direction:column;justify-content:space-between;cursor:pointer;overflow:hidden}
+.entry-tile:hover{border-color:var(--accent)}
+.entry-tile .tile-name{overflow-wrap:anywhere;font-weight:550;margin-top:10px}
+.selection-box{accent-color:var(--accent);width:16px;height:16px;cursor:pointer}
+.drop-active{outline:2px dashed var(--accent);outline-offset:-6px;background:var(--panel2)}
+.ficon{width:26px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--muted)}
+.ficon svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .row-ops{display:flex;gap:6px;justify-content:flex-end}
 .row-ops button{padding:4px 8px;font-size:.76rem}
 .empty{padding:48px 20px;text-align:center;color:var(--muted)}
@@ -74,16 +81,17 @@ pre.code-view{background:var(--bg);padding:16px;border-radius:10px;overflow:auto
 </head>
 <body>
 <header class="topbar">
-  <div class="brand" onclick="navTo('/')">
+  <div class="brand" role="button" tabindex="0" onclick="navTo('/')" onkeydown="if(event.key==='Enter')navTo('/')">
     <img class="brand-logo" alt="@nggkhaiz logo" width="30" height="30" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAB00lEQVR4AeyVuy8EURTG1zMKBQUaJJ4FohcKBVqPQqGgEDoqQkFIaLwaOioaQYFWNBL8AUgIiZKIaISIxOt3kh13xtyxszP7Kmbz/XLuuffMmW/vzN5NDyX5ExhIyR345rWIJ7RXSskdUPYSMAp2INgB3Q6k8e55pYZrD0GnSyZbwSKdAUuBy6SAulU4hxYw64FkEOrAZs6vgRyaTsAtDEAGGHpjMAsVsAZfYJNXA/KIeul2AzOQC4bkFN0gqYRJeAVHeTHQSLczWIdiMOuEpB764A4iKhoDspV7dDwGeZ6EX10z6oAmuADXcmMgn27LcAXtYNYTyTDUwj5Erf8MZNNtBOQFGyJmgqF3BotQDivwAZ7kZKCbbvKNF4h5YNY2SRWMwjP4ks7AKR23oAz+6oAJOVD6idMe4TIlnYEGtWwbtTEz5RMuV9IZUKsJGAUGnHZAflabPIFOkJ+fHL1CFnkXyNon0bd0BpboWgo9ICef+UZibJd5WSshSu0L0a1stToDcvjcu+goNVJbTa0YeSQ6SdakRmotNToDlgIXiWGkiFo5wOaJR2HmiDJXSBSzUstQKRYGjG7yN7xDMgbNYcaJMkfQK5YG9HeIMBt3AxHuH/oBAAD//zKEaE0AAAAGSURBVAMAMcNrQerOH9kAAAAASUVORK5CYII=">
     <span id="siteTitle">AList @nggkhaiz</span>
     <span class="badge">v4.1.0</span>
   </div>
   <div class="actions">
-    <button class="btn" onclick="openSearch()">🔍 Search</button>
-    <button class="btn" onclick="toggleTheme()" title="Switch Theme">🌓</button>
+    <button class="btn" onclick="openSearch()">Search</button>
+    <button class="btn" onclick="toggleTheme()" title="Switch theme">Theme</button>
     <span id="userBadge" style="font-size:.84rem;color:var(--muted)"></span>
-    <button class="btn" id="btnAdmin" style="display:none" onclick="toggleAdminView()">⚙️ Admin</button>
+    <button class="btn" id="btnSecurity" style="display:none" onclick="openSecurityModal()">Security</button>
+    <button class="btn" id="btnAdmin" style="display:none" onclick="toggleAdminView()">Admin</button>
     <button class="btn btn-primary" id="btnAuth" onclick="openLogin()">Sign In</button>
   </div>
 </header>
@@ -106,25 +114,35 @@ pre.code-view{background:var(--bg);padding:16px;border-radius:10px;overflow:auto
       <div class="crumbs">
         <div class="crumb-list" id="breadcrumbs"></div>
         <div style="display:flex;gap:6px">
-          <button class="btn" onclick="loadPath(state.path, true)">↻ Refresh</button>
+          <button class="btn" onclick="setViewMode('list')" aria-label="List view">List</button>
+          <button class="btn" onclick="setViewMode('grid')" aria-label="Grid view">Grid</button>
+          <button class="btn" onclick="loadPath(state.path, true)">Refresh</button>
         </div>
       </div>
       <div class="toolbar" id="writeToolbar" style="display:none">
         <label class="btn btn-primary" style="cursor:pointer">
-          ⬆ Upload Files
+          Upload files
           <input type="file" id="fileInput" multiple style="display:none" onchange="uploadFiles(this.files)">
         </label>
-        <button class="btn" onclick="promptMkdir()">📁 New Folder</button>
-        <button class="btn" onclick="promptOfflineDl()">🌐 Offline URL</button>
+        <button class="btn" onclick="promptMkdir()">New folder</button>
+        <button class="btn" onclick="promptOfflineDl()">Offline URL</button>
+        <div id="batchBar" style="display:none;align-items:center;gap:6px">
+          <span id="selectedCount" style="color:var(--muted)"></span>
+          <button class="btn" onclick="batchTransfer('copy')">Copy to</button>
+          <button class="btn" onclick="batchTransfer('move')">Move to</button>
+          <button class="btn btn-danger" onclick="batchDelete()">Delete selected</button>
+          <button class="btn" onclick="clearSelection()">Clear</button>
+        </div>
         <div id="uploadStatus" style="flex:1;min-width:180px;display:none">
           <div style="font-size:.78rem;color:var(--muted)" id="uploadLabel">Uploading...</div>
           <div class="prog"><div id="uploadBar"></div></div>
+          <button class="btn" id="uploadCancel" onclick="cancelUpload()">Cancel queue</button>
         </div>
       </div>
       <div id="explorerContent"></div>
     </div>
     <div class="card" id="readmeCard" style="display:none">
-      <div class="crumbs"><strong>📄 README</strong></div>
+      <div class="crumbs"><strong>README</strong></div>
       <div class="readme-card" id="readmeBody"></div>
     </div>
   </section>
@@ -133,13 +151,14 @@ pre.code-view{background:var(--bg);padding:16px;border-radius:10px;overflow:auto
   <section id="adminView" style="display:none">
     <div class="card">
       <div class="tabs">
-        <div class="tab active" onclick="switchAdminTab('storages',this)">🗄 Storages</div>
-        <div class="tab" onclick="switchAdminTab('users',this)">👤 Users</div>
-        <div class="tab" onclick="switchAdminTab('roles',this)">🛡 Roles</div>
-        <div class="tab" onclick="switchAdminTab('metas',this)">🔒 Path Metas</div>
-        <div class="tab" onclick="switchAdminTab('shares',this)">🔗 Shares</div>
-        <div class="tab" onclick="switchAdminTab('tasks',this)">⚡ Tasks</div>
-        <div class="tab" onclick="switchAdminTab('settings',this)">⚙ Settings & Search</div>
+        <div class="tab active" onclick="switchAdminTab('storages',this)">Storages</div>
+        <div class="tab" onclick="switchAdminTab('users',this)">Users</div>
+        <div class="tab" onclick="switchAdminTab('roles',this)">Roles</div>
+        <div class="tab" onclick="switchAdminTab('metas',this)">Path metas</div>
+        <div class="tab" onclick="switchAdminTab('shares',this)">Shares</div>
+        <div class="tab" onclick="switchAdminTab('tasks',this)">Tasks</div>
+        <div class="tab" onclick="switchAdminTab('telemetry',this)">Telemetry</div>
+        <div class="tab" onclick="switchAdminTab('settings',this)">Settings & search</div>
         <div class="tab" onclick="toggleAdminView()" style="margin-left:auto">← Back to Files</div>
       </div>
       <div id="adminPanelBody" style="padding:18px"></div>
@@ -160,6 +179,13 @@ const state = {
   me: null,
   dirPasswords: {},
   entries: [],
+  selected: new Set(),
+  viewMode: localStorage.getItem('alist_view') === 'grid' ? 'grid' : 'list',
+  uploadXhr: null,
+  uploadCancelled: false,
+  textEdit: null,
+  telemetryTimer: null,
+  pendingOtpSecret: '',
   sortCol: 'name',
   sortAsc: true,
   adminOpen: false,
@@ -172,6 +198,15 @@ const state = {
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+function safeArg(value) {
+  return encodeURIComponent(String(value)).replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+}
+function safeHref(value) {
+  const s = String(value || '');
+  try { const u = new URL(s, location.origin); return (u.protocol === 'http:' || u.protocol === 'https:') ? esc(s) : '#'; }
+  catch { return '#'; }
+}
+function encodePath(path) { return String(path).split('/').map(part => encodeURIComponent(part)).join('/'); }
 function fmtSize(b, isDir) {
   if (isDir) return '-';
   const u = ['B','KB','MB','GB','TB'];
@@ -180,9 +215,11 @@ function fmtSize(b, isDir) {
   return (i === 0 ? v : v.toFixed(1)) + ' ' + u[i];
 }
 function iconFor(e) {
-  if (e.is_dir) return '📁';
-  const m = {2:'📕',3:'🎬',4:'🎵',5:'📝',6:'🖼',7:'🗜'};
-  return m[e.type] || '📄';
+  let p='<path d="M4 5.5h6l2 2h8v11H4z"/><path d="M4 9h16"/>';
+  if(!e.is_dir){
+    const paths={2:'<path d="M7 3.5h7l4 4v13H7z"/><path d="M14 3.5v4h4M10 12h5M10 15h5"/>',3:'<rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/>',4:'<path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/>',5:'<path d="M7 3.5h7l4 4v13H7z"/><path d="M14 3.5v4h4M10 12h5M10 15h5"/>',6:'<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m5 17 5-4 3 2 3-4 4 6"/>',7:'<path d="M4 6.5h16v13H4zM4 10h16M8 6.5V4m8 2.5V4"/>'};p=paths[e.type]||'<path d="M7 3.5h7l4 4v13H7z"/><path d="M14 3.5v4h4"/>';
+  }
+  return `<svg viewBox="0 0 24 24" aria-hidden="true">${p}</svg>`;
 }
 function toast(msg) {
   const el = document.getElementById('toast');
@@ -260,16 +297,18 @@ async function refreshMe() {
   if (r.code === 200 && r.data) {
     state.me = r.data;
     const isGuest = r.data.role === 1;
-    document.getElementById('userBadge').textContent = isGuest ? 'Guest' : ('👤 ' + r.data.username);
+    document.getElementById('userBadge').textContent = isGuest ? 'Guest' : ('' + r.data.username);
     document.getElementById('btnAuth').textContent = isGuest ? 'Sign In' : 'Sign Out';
     document.getElementById('btnAuth').onclick = isGuest ? openLogin : doLogout;
     document.getElementById('btnAdmin').style.display = (r.data.role === 2) ? 'inline-flex' : 'none';
+    document.getElementById('btnSecurity').style.display = isGuest ? 'none' : 'inline-flex';
   } else {
     state.me = null;
     document.getElementById('userBadge').textContent = '';
     document.getElementById('btnAuth').textContent = 'Sign In';
     document.getElementById('btnAuth').onclick = openLogin;
     document.getElementById('btnAdmin').style.display = 'none';
+    document.getElementById('btnSecurity').style.display = 'none';
   }
 }
 
@@ -290,14 +329,25 @@ async function submitLogin() {
   const password = document.getElementById('lgPass').value;
   const otp_code = document.getElementById('lgOtp').value.trim();
   const r = await api('/api/auth/login', {method:'POST', json:{username, password, otp_code}});
-  if (r.code !== 200) { toast('❌ ' + (r.message || 'Login failed')); return; }
+  if (r.code !== 200) { toast('Error:  ' + (r.message || 'Login failed')); return; }
   state.token = r.data.token;
   localStorage.setItem('alist_token', state.token);
   closeModal();
-  toast('✅ Signed in as ' + username);
+  toast(' Signed in as ' + username);
   await refreshMe();
   await loadPath(state.path, true);
 }
+
+async function openSecurityModal() {
+  const otpEnabled=!!state.me?.otp;
+  if(otpEnabled){openModal(`<h3>Account security</h3><p style="margin-bottom:12px;color:var(--muted)">Authenticator-based two-factor authentication is enabled.</p><label class="field"><span>Current 6-digit code</span><input class="input" id="otpDisableCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6"></label><div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn" onclick="closeModal()">Close</button><button class="btn btn-danger" onclick="disableTwoFactor()">Disable 2FA</button></div>`);return;}
+  const g=await api('/api/auth/2fa/generate',{method:'POST',json:{}});
+  if(g.code!==200){toast(g.message||'Could not start 2FA setup');return;}
+  state.pendingOtpSecret=g.data.secret;
+  openModal(`<h3>Set up two-factor authentication</h3><p style="color:var(--muted);margin-bottom:10px">Add this key to an authenticator app, then enter the current 6-digit code to verify.</p><div class="field"><label>Setup key</label><input class="input" readonly value="${esc(g.data.secret)}" onclick="this.select()"></div><div class="field"><label>Authenticator URI</label><input class="input" readonly value="${esc(g.data.qr)}" onclick="this.select()"></div><div class="field"><label>Verification code</label><input class="input" id="otpEnableCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6"></div><div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="enableTwoFactor()">Verify and enable</button></div>`);
+}
+async function enableTwoFactor(){const code=document.getElementById('otpEnableCode').value.trim();const r=await api('/api/auth/2fa/verify',{method:'POST',json:{secret:state.pendingOtpSecret,code}});if(r.code!==200){toast(r.message||'Code verification failed');return;}state.pendingOtpSecret='';closeModal();toast('Two-factor authentication enabled');await refreshMe();}
+async function disableTwoFactor(){const code=document.getElementById('otpDisableCode').value.trim();const r=await api('/api/auth/2fa/cancel',{method:'POST',json:{code}});if(r.code!==200){toast(r.message||'Could not disable 2FA');return;}closeModal();toast('Two-factor authentication disabled');await refreshMe();}
 
 async function doLogout() {
   await api('/api/auth/logout');
@@ -325,29 +375,31 @@ function navTo(p) {
 function renderBreadcrumbs(p) {
   const el = document.getElementById('breadcrumbs');
   const segs = p.split('/').filter(Boolean);
-  let html = `<span class="crumb ${segs.length===0?'active':''}" onclick="navTo('/')">🏠 Home</span>`;
+  let html = `<span class="crumb ${segs.length===0?'active':''}" onclick="navTo('/')">Home</span>`;
   let cur = '';
   segs.forEach((s, idx) => {
     cur += '/' + s;
     const target = cur;
-    html += `<span style="color:var(--muted)">/</span><span class="crumb ${idx===segs.length-1?'active':''}" onclick="navTo('${esc(target)}')">${esc(s)}</span>`;
+    html += `<span style="color:var(--muted)">/</span><span class="crumb ${idx===segs.length-1?'active':''}" onclick="navTo(decodeURIComponent('${safeArg(target)}'))">${esc(s)}</span>`;
   });
   el.innerHTML = html;
 }
 
 async function loadPath(p, refresh) {
-  state.path = p || '/';
+  const nextPath = p || '/';
+  if (nextPath !== state.path) state.selected.clear();
+  state.path = nextPath;
   renderBreadcrumbs(state.path);
   const pw = state.dirPasswords[state.path] || '';
   const r = await api('/api/fs/list', {method:'POST', json:{path: state.path, password: pw, refresh: !!refresh, page:1, per_page:0}});
   const box = document.getElementById('explorerContent');
   if (r.code === 401) {
-    box.innerHTML = `<div class="empty"><p style="margin-bottom:12px">🔒 Sign in is required to browse files.</p><button class="btn btn-primary" onclick="openLogin()">Sign In</button></div>`;
+    box.innerHTML = `<div class="empty"><p style="margin-bottom:12px">Sign in is required to browse files.</p><button class="btn btn-primary" onclick="openLogin()">Sign In</button></div>`;
     document.getElementById('writeToolbar').style.display = 'none';
     return;
   }
   if (r.code === 403 && (r.message || '').toLowerCase().includes('password')) {
-    box.innerHTML = `<div class="empty"><p style="margin-bottom:12px">🔑 This folder is protected by a password.</p>
+    box.innerHTML = `<div class="empty"><p style="margin-bottom:12px">This folder is protected by a password.</p>
       <div style="max-width:300px;margin:0 auto;display:flex;gap:8px">
         <input class="input" type="password" id="dirPwIn" placeholder="Folder password">
         <button class="btn btn-primary" onclick="state.dirPasswords[state.path]=document.getElementById('dirPwIn').value;loadPath(state.path,false)">Unlock</button>
@@ -355,7 +407,7 @@ async function loadPath(p, refresh) {
     return;
   }
   if (r.code !== 200) {
-    box.innerHTML = `<div class="empty">⚠️ ${esc(r.message || 'Unable to load directory')}</div>`;
+    box.innerHTML = `<div class="empty">Notice:  ${esc(r.message || 'Unable to load directory')}</div>`;
     return;
   }
   const d = r.data || {};
@@ -378,8 +430,9 @@ function sortBy(col) {
 
 function renderEntries() {
   const box = document.getElementById('explorerContent');
+  renderBatchBar();
   if (!state.entries.length) {
-    box.innerHTML = `<div class="empty">📭 Empty directory. ${state.me?.role===2 && state.path==='/' ? 'Open <b>⚙️ Admin → Storages</b> to mount Local, S3, WebDAV, Cloud, or Crypt storage.' : ''}</div>`;
+    box.innerHTML = `<div class="empty">Empty directory. ${state.me?.role===2 && state.path==='/' ? 'Open <b>Admin → Storages</b> to mount Local, S3, WebDAV, Cloud, or Crypt storage.' : ''}</div>`;
     return;
   }
   const list = [...state.entries].sort((a, b) => {
@@ -391,18 +444,27 @@ function renderEntries() {
     return state.sortAsc ? c : -c;
   });
   const canManage = state.me && state.me.role !== 1;
+  if (state.viewMode === 'grid') {
+    box.innerHTML = `<div class="entry-grid">` + list.map(e =>
+      `<div class="entry-tile" role="button" tabindex="0" onclick="openEntry(decodeURIComponent('${safeArg(e.name)}'),${!!e.is_dir})" onkeydown="if(event.key==='Enter')openEntry(decodeURIComponent('${safeArg(e.name)}'),${!!e.is_dir})">
+        <div style="display:flex;align-items:center;justify-content:space-between"><span class="ficon">${iconFor(e)}</span><input class="selection-box" type="checkbox" aria-label="Select ${esc(e.name)}" ${state.selected.has(e.name)?'checked':''} onclick="event.stopPropagation()" onchange="toggleSelection(decodeURIComponent('${safeArg(e.name)}'),this.checked)"></div>
+        <div class="tile-name">${esc(e.name)}</div><small style="color:var(--muted)">${fmtSize(e.size,e.is_dir)}</small>
+      </div>`).join('') + `</div>`;
+    return;
+  }
   let rows = list.map(e => {
     const full = joinPath(state.path, e.name);
-    const dlUrl = '/d' + encodeURI(full) + (e.sign ? ('?sign=' + encodeURIComponent(e.sign)) : '');
-    return `<tr onclick="openEntry('${esc(e.name)}', ${!!e.is_dir})">
-      <td><div class="fname"><span class="ficon">${iconFor(e)}</span><span>${esc(e.name)}</span></div></td>
+    const safeName = safeArg(e.name), safeFull = safeArg(full);
+    const dlUrl = '/d' + encodePath(full) + (e.sign ? ('?sign=' + encodeURIComponent(e.sign)) : '');
+    return `<tr onclick="openEntry(decodeURIComponent('${safeName}'), ${!!e.is_dir})">
+      <td><input class="selection-box" type="checkbox" aria-label="Select ${esc(e.name)}" ${state.selected.has(e.name)?'checked':''} onclick="event.stopPropagation()" onchange="toggleSelection(decodeURIComponent('${safeName}'),this.checked)"><div class="fname"><span class="ficon">${iconFor(e)}</span><span>${esc(e.name)}</span></div></td>
       <td style="width:120px;color:var(--muted)">${fmtSize(e.size, e.is_dir)}</td>
       <td style="width:190px;color:var(--muted)">${esc((e.modified||'').replace('T',' ').replace('Z',''))}</td>
       <td style="width:210px" onclick="event.stopPropagation()"><div class="row-ops">
         ${!e.is_dir ? `<a class="btn" href="${dlUrl}" download>⬇</a>` : ''}
-        ${canManage ? `<button class="btn" title="Share" onclick="openCreateShare('${esc(full)}',${!!e.is_dir})">🔗</button>
-        <button class="btn" title="Rename" onclick="promptRename('${esc(full)}','${esc(e.name)}')">✏️</button>
-        <button class="btn btn-danger" title="Delete" onclick="confirmDelete('${esc(full)}','${esc(e.name)}')">🗑</button>` : ''}
+        ${canManage ? `<button class="btn" title="Share" onclick="openCreateShare(decodeURIComponent('${safeFull}'),${!!e.is_dir})">Share</button>
+        <button class="btn" title="Rename" onclick="promptRename(decodeURIComponent('${safeFull}'),decodeURIComponent('${safeName}'))">Rename</button>
+        <button class="btn btn-danger" title="Delete" onclick="confirmDelete(decodeURIComponent('${safeFull}'),decodeURIComponent('${safeName}'))">Delete</button>` : ''}
       </div></td>
     </tr>`;
   }).join('');
@@ -414,15 +476,49 @@ function renderEntries() {
   </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+function setViewMode(mode) {
+  state.viewMode = mode === 'grid' ? 'grid' : 'list';
+  localStorage.setItem('alist_view', state.viewMode);
+  renderEntries();
+}
+function toggleSelection(name, checked) {
+  checked ? state.selected.add(name) : state.selected.delete(name);
+  renderBatchBar();
+}
+function clearSelection() { state.selected.clear(); renderEntries(); }
+function renderBatchBar() {
+  const bar = document.getElementById('batchBar');
+  if (!bar) return;
+  bar.style.display = state.selected.size ? 'flex' : 'none';
+  const count = document.getElementById('selectedCount');
+  if (count) count.textContent = `${state.selected.size} selected`;
+}
+async function batchDelete() {
+  const names = [...state.selected];
+  if (!names.length || !await askConfirm('Delete selected items', `Permanently delete ${names.length} selected item(s)?`, 'Delete')) return;
+  const r = await api('/api/fs/remove', {method:'POST', json:{dir:state.path,names}});
+  if (r.code !== 200) { toast('Delete failed: ' + (r.message || 'request failed')); return; }
+  state.selected.clear(); toast('Selected items deleted'); loadPath(state.path, true);
+}
+async function batchTransfer(kind) {
+  const names = [...state.selected];
+  if (!names.length) return;
+  const dst_dir = (await askText(kind === 'move' ? 'Move selected items' : 'Copy selected items', 'Destination folder path', state.path)).trim();
+  if (!dst_dir) return;
+  const r = await api('/api/fs/' + kind, {method:'POST', json:{src_dir:state.path,dst_dir,names,as_task:kind==='copy'}});
+  if (r.code !== 200) { toast((kind==='move'?'Move':'Copy') + ' failed: ' + (r.message || 'request failed')); return; }
+  state.selected.clear(); toast(`${kind==='move'?'Move':'Copy'} queued`); loadPath(state.path, true);
+}
+
 async function openEntry(name, isDir) {
   const full = joinPath(state.path, name);
   if (isDir) { navTo(full); return; }
   const pw = state.dirPasswords[state.path] || '';
   const r = await api('/api/fs/get', {method:'POST', json:{path: full, password: pw}});
-  if (r.code !== 200) { toast('❌ ' + r.message); return; }
+  if (r.code !== 200) { toast('Error:  ' + r.message); return; }
   const d = r.data;
-  const rawUrl = d.raw_url || ('/d' + encodeURI(full) + (d.sign ? '?sign=' + encodeURIComponent(d.sign) : ''));
-  const proxyUrl = '/p' + encodeURI(full) + (d.sign ? '?sign=' + encodeURIComponent(d.sign) : '');
+  const rawUrl = d.raw_url || ('/d' + encodePath(full) + (d.sign ? '?sign=' + encodeURIComponent(d.sign) : ''));
+  const proxyUrl = '/p' + encodePath(full) + (d.sign ? '?sign=' + encodeURIComponent(d.sign) : '');
   let body = '';
   if (d.type === 3) {
     body = `<video controls autoplay src="${proxyUrl}"></video>`;
@@ -432,15 +528,16 @@ async function openEntry(name, isDir) {
     body = `<img src="${proxyUrl}" alt="${esc(d.name)}">`;
   } else if (d.type === 5 && d.size <= 524288) {
     const txt = await (await fetch(proxyUrl)).text();
+    state.textEdit = {path:full,text:txt};
     body = `<pre class="code-view">${esc(txt)}</pre>`;
   } else if (name.toLowerCase().endsWith('.zip')) {
     const ar = await api('/api/fs/archive/list', {method:'POST', json:{path: full, password: pw}});
     if (ar.code === 200 && ar.data?.content) {
-      body = `<div style="margin-bottom:8px;color:var(--muted)">🗜 ZIP Archive Contents (${ar.data.content.length} items):</div>
+      body = `<div style="margin-bottom:8px;color:var(--muted)">ZIP archive contents (${ar.data.content.length} items):</div>
         <div style="max-height:360px;overflow:auto;border:1px solid var(--border);border-radius:8px">` +
         ar.data.content.map(z => `<div style="display:flex;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--border);font-size:.85rem">
-          <span>${z.is_dir?'📁':'📄'} ${esc(z.path)}</span>
-          <span>${fmtSize(z.size, z.is_dir)} ${!z.is_dir ? `<a class="btn" style="padding:2px 8px;margin-left:8px" href="/ad${encodeURI(full)}?inner=${encodeURIComponent(z.path)}&sign=${encodeURIComponent(z.sign||'')}">Extract</a>` : ''}</span>
+          <span>${z.is_dir?'Folder ':'File '} ${esc(z.path)}</span>
+          <span>${fmtSize(z.size, z.is_dir)} ${!z.is_dir ? `<a class="btn" style="padding:2px 8px;margin-left:8px" href="/ad${encodePath(full)}?inner=${encodeURIComponent(z.path)}&sign=${encodeURIComponent(z.sign||'')}">Extract</a>` : ''}</span>
         </div>`).join('') + `</div>`;
     }
   } else {
@@ -449,39 +546,84 @@ async function openEntry(name, isDir) {
   openModal(`<h3>${iconFor(d)} ${esc(d.name)}</h3>
     <div class="preview-box">${body}</div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
-      <button class="btn" onclick="navigator.clipboard?.writeText(location.origin+'${rawUrl}');toast('Copied direct link!')">📋 Copy Link</button>
-      <a class="btn btn-primary" href="${rawUrl}" download>⬇ Download</a>
+      ${d.type===5 && state.textEdit && state.me && state.me.role!==1 ? `<button class="btn" onclick="openTextEditor()">Edit text</button>` : ''}
+      <button class="btn" onclick="navigator.clipboard?.writeText(location.origin+decodeURIComponent('${safeArg(rawUrl)}'));toast('Copied direct link!')">Copy link</button>
+      <a class="btn btn-primary" href="${safeHref(rawUrl)}" download>⬇ Download</a>
       <button class="btn" onclick="closeModal()">Close</button>
     </div>`);
 }
 
+function openTextEditor() {
+  if (!state.textEdit) return;
+  openModal(`<h3>Text editor · ${esc(state.textEdit.path.split('/').pop())}</h3>
+    <textarea id="textEditor" class="input" spellcheck="false" style="min-height:55vh;font-family:ui-monospace,monospace;resize:vertical">${esc(state.textEdit.text)}</textarea>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px"><small style="color:var(--muted)">Ctrl/⌘+S to save</small><div style="display:flex;gap:8px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveTextEditor()">Save</button></div></div>`);
+  document.getElementById('textEditor').addEventListener('keydown', event => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); saveTextEditor(); }
+    if (event.key === 'Tab') { event.preventDefault(); const el = event.target; const a=el.selectionStart,b=el.selectionEnd; el.setRangeText('  ',a,b,'end'); }
+  });
+}
+async function saveTextEditor() {
+  if (!state.textEdit) return;
+  const text = document.getElementById('textEditor')?.value;
+  if (text === undefined) return;
+  const r = await api('/api/fs/put', {method:'PUT',headers:{'File-Path':encodeURIComponent(state.textEdit.path),'Password':state.dirPasswords[state.path]||''},body:text});
+  if (r.code !== 200) { toast('Save failed: ' + (r.message || 'request failed')); return; }
+  state.textEdit.text = text;
+  toast('File saved');
+  closeModal();
+  loadPath(state.path, true);
+}
+
+function cancelUpload() {
+  state.uploadCancelled = true;
+  state.uploadXhr?.abort();
+}
 async function uploadFiles(files) {
-  if (!files || !files.length) return;
+  if (!files || !files.length || state.uploadXhr) return;
+  state.uploadCancelled = false;
   const stBox = document.getElementById('uploadStatus');
   const bar = document.getElementById('uploadBar');
   const lbl = document.getElementById('uploadLabel');
   stBox.style.display = 'block';
   for (let i = 0; i < files.length; i++) {
+    if (state.uploadCancelled) break;
     const f = files[i];
     const target = joinPath(state.path, f.name);
     lbl.textContent = `Uploading (${i+1}/${files.length}): ${f.name}`;
     bar.style.width = '0%';
     await new Promise((resolve) => {
       const xhr = new XMLHttpRequest();
+      state.uploadXhr = xhr;
+      const started = performance.now();
       xhr.open('PUT', '/api/fs/put');
       if (state.token) xhr.setRequestHeader('Authorization', state.token);
       xhr.setRequestHeader('Client-Id', state.clientId);
       xhr.setRequestHeader('File-Path', encodeURIComponent(target));
       if (state.dirPasswords[state.path]) xhr.setRequestHeader('Password', state.dirPasswords[state.path]);
-      xhr.upload.onprogress = e => { if (e.lengthComputable) bar.style.width = Math.round(e.loaded * 100 / e.total) + '%'; };
-      xhr.onload = () => resolve();
-      xhr.onerror = () => resolve();
+      xhr.upload.onprogress = e => {
+        if (!e.lengthComputable) return;
+        bar.style.width = Math.round(e.loaded * 100 / e.total) + '%';
+        const elapsed = Math.max(0.001, (performance.now() - started) / 1000);
+        lbl.textContent = `Uploading (${i+1}/${files.length}): ${f.name} · ${(e.loaded / elapsed / 1048576).toFixed(2)} MB/s`;
+      };
+      xhr.onload = () => {
+        let payload = null;
+        try { payload = JSON.parse(xhr.responseText); } catch {}
+        const ok = xhr.status >= 200 && xhr.status < 300 && payload?.code === 200;
+        if (!ok) toast(`Upload failed: ${payload?.message || f.name}`);
+        resolve(ok);
+      };
+      xhr.onerror = () => { toast(`Network error uploading ${f.name}`); resolve(false); };
+      xhr.onabort = () => resolve(false);
       xhr.send(f);
     });
+    state.uploadXhr = null;
   }
+  state.uploadXhr = null;
   stBox.style.display = 'none';
   document.getElementById('fileInput').value = '';
-  toast('✅ Upload complete');
+  toast(state.uploadCancelled ? 'Upload queue cancelled' : 'Upload queue finished');
   loadPath(state.path, true);
 }
 
@@ -489,31 +631,31 @@ async function promptMkdir() {
   const name = (await askText('Create folder', 'Folder name')).trim();
   if (!name) return;
   const r = await api('/api/fs/mkdir', {method:'POST', json:{path: joinPath(state.path, name)}});
-  toast(r.code === 200 ? '✅ Folder created' : ('❌ ' + r.message));
+  toast(r.code === 200 ? ' Folder created' : ('Error:  ' + r.message));
   if (r.code === 200) loadPath(state.path, true);
 }
 async function promptRename(fullPath, oldName) {
   const name = (await askText('Rename item', 'New name', oldName)).trim();
   if (!name || name === oldName) return;
   const r = await api('/api/fs/rename', {method:'POST', json:{path: fullPath, name}});
-  toast(r.code === 200 ? '✅ Renamed' : ('❌ ' + r.message));
+  toast(r.code === 200 ? ' Renamed' : ('Error:  ' + r.message));
   if (r.code === 200) loadPath(state.path, true);
 }
 async function confirmDelete(fullPath, name) {
   if (!await askConfirm('Delete item', `Delete "${name}" permanently?`, 'Delete')) return;
   const r = await api('/api/fs/remove', {method:'POST', json:{dir: state.path, names:[name]}});
-  toast(r.code === 200 ? '🗑 Deleted' : ('❌ ' + r.message));
+  toast(r.code === 200 ? ' Deleted' : ('Error:  ' + r.message));
   if (r.code === 200) loadPath(state.path, true);
 }
 async function promptOfflineDl() {
   const url = (await askText('Queue offline download', 'HTTP or HTTPS URL', '', 'https://example.com/file')).trim();
   if (!url) return;
   const r = await api('/api/fs/add_offline_download', {method:'POST', json:{path: state.path, urls:[url]}});
-  toast(r.code === 200 ? '⚡ Offline download task queued!' : ('❌ ' + r.message));
+  toast(r.code === 200 ? ' Offline download task queued!' : ('Error:  ' + r.message));
 }
 
 function openSearch() {
-  openModal(`<h3>🔍 Instant Full-Text Search (SQLite FTS5)</h3>
+  openModal(`<h3>Instant full-text search (SQLite FTS5)</h3>
     <div style="display:flex;gap:8px;margin-bottom:14px">
       <input class="input" id="srchIn" placeholder="Type keywords (diacritic-insensitive)..." onkeydown="if(event.key==='Enter')runSearch()">
       <button class="btn btn-primary" onclick="runSearch()">Search</button>
@@ -532,15 +674,15 @@ async function runSearch() {
   }
   box.innerHTML = r.data.content.map(h => {
     const p = joinPath(h.parent, h.name);
-    return `<div style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between" onclick="closeModal();navTo('${esc(h.is_dir ? p : h.parent)}')">
-      <span>${h.is_dir?'📁':'📄'} <b>${esc(h.name)}</b> <small style="color:var(--muted)">(${esc(h.parent)})</small></span>
+    return `<div style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between" onclick="closeModal();navTo(decodeURIComponent('${safeArg(h.is_dir ? p : h.parent)}'))">
+      <span>${h.is_dir?'Folder ':'File '} <b>${esc(h.name)}</b> <small style="color:var(--muted)">(${esc(h.parent)})</small></span>
       <span style="color:var(--muted)">${fmtSize(h.size, h.is_dir)}</span>
     </div>`;
   }).join('');
 }
 
 function openCreateShare(path, isDir) {
-  openModal(`<h3>🔗 Create Public Share Link</h3>
+  openModal(`<h3>Create public share link</h3>
     <p style="font-size:.84rem;color:var(--muted);margin-bottom:12px">Target: <code>${esc(path)}</code></p>
     <div class="grid-2">
       <div class="field"><label>Optional Share Password</label><input class="input" id="shPass" placeholder="Leave blank for open link"></div>
@@ -549,7 +691,7 @@ function openCreateShare(path, isDir) {
     <div class="field"><label>Max Downloads (0 = Unlimited)</label><input class="input" type="number" id="shMax" value="0"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
       <button class="btn" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="submitCreateShare('${esc(path)}',${isDir})">Create Share</button>
+      <button class="btn btn-primary" onclick="submitCreateShare(decodeURIComponent('${safeArg(path)}'),${isDir})">Create Share</button>
     </div>`);
 }
 async function submitCreateShare(path, is_dir) {
@@ -557,12 +699,12 @@ async function submitCreateShare(path, is_dir) {
   const expH = Number(document.getElementById('shExp').value || 0);
   const max_downloads = Number(document.getElementById('shMax').value || 0);
   const r = await api('/api/share/create', {method:'POST', json:{path, is_dir, password, expires_hours: expH, max_downloads}});
-  if (r.code !== 200) { toast('❌ ' + r.message); return; }
+  if (r.code !== 200) { toast('Error:  ' + r.message); return; }
   const url = location.origin + '/s/' + r.data.share_id;
-  openModal(`<h3>✅ Share Link Ready</h3>
+  openModal(`<h3> Share Link Ready</h3>
     <div class="field"><label>Public URL</label><input class="input" readonly value="${esc(url)}" onclick="this.select()"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn btn-primary" onclick="navigator.clipboard?.writeText('${esc(url)}');toast('Copied!')">📋 Copy URL</button>
+      <button class="btn btn-primary" onclick="navigator.clipboard?.writeText(decodeURIComponent('${safeArg(url)}'));toast('Copied!')">Copy URL</button>
       <button class="btn" onclick="closeModal()">Done</button>
     </div>`);
 }
@@ -572,9 +714,9 @@ async function loadPublicShare(sub) {
   state.shareSub = sub || '/';
   const info = await api('/api/public/share/info?share_id=' + encodeURIComponent(state.shareId));
   const body = document.getElementById('shareBody');
-  if (info.code !== 200) { body.innerHTML = `<div class="empty">❌ ${esc(info.message)}</div>`; return; }
+  if (info.code !== 200) { body.innerHTML = `<div class="empty">Error:  ${esc(info.message)}</div>`; return; }
   if (info.data.has_password && !state.shareToken) {
-    body.innerHTML = `<div class="empty"><p style="margin-bottom:12px">🔒 Password-protected share</p>
+    body.innerHTML = `<div class="empty"><p style="margin-bottom:12px"> Password-protected share</p>
       <div style="max-width:300px;margin:0 auto;display:flex;gap:8px">
         <input class="input" type="password" id="shAuthPw" placeholder="Enter share password">
         <button class="btn btn-primary" onclick="authPublicShare()">Unlock</button>
@@ -584,26 +726,26 @@ async function loadPublicShare(sub) {
   document.getElementById('shareMetaBadge').textContent = 'Shared by ' + info.data.creator;
   if (!info.data.is_dir) {
     const dl = `/sd/${encodeURIComponent(state.shareId)}?token=${encodeURIComponent(state.shareToken)}`;
-    body.innerHTML = `<div class="empty"><h3 style="margin-bottom:10px">📄 ${esc(info.data.name)}</h3>
+    body.innerHTML = `<div class="empty"><h3 style="margin-bottom:10px">File  ${esc(info.data.name)}</h3>
       <a class="btn btn-primary" href="${dl}">⬇ Download Shared File</a></div>`;
     return;
   }
   const ls = await api('/api/public/share/list', {method:'POST', headers:{'X-Share-Token':state.shareToken}, json:{share_id:state.shareId, path:state.shareSub}});
-  if (ls.code !== 200) { body.innerHTML = `<div class="empty">❌ ${esc(ls.message)}</div>`; return; }
+  if (ls.code !== 200) { body.innerHTML = `<div class="empty">Error:  ${esc(ls.message)}</div>`; return; }
   body.innerHTML = `<table><thead><tr><th>Name</th><th>Size</th><th style="text-align:right">Download</th></tr></thead><tbody>` +
     (ls.data.content || []).map(e => {
       const sp = joinPath(state.shareSub, e.name);
-      return `<tr onclick="${e.is_dir ? `loadPublicShare('${esc(sp)}')` : ''}">
+      return `<tr onclick="${e.is_dir ? `loadPublicShare(decodeURIComponent('${safeArg(sp)}'))` : ''}">
         <td><div class="fname"><span class="ficon">${iconFor(e)}</span><span>${esc(e.name)}</span></div></td>
         <td>${fmtSize(e.size, e.is_dir)}</td>
-        <td style="text-align:right">${!e.is_dir ? `<a class="btn" href="/sd/${encodeURIComponent(state.shareId)}${encodeURI(sp)}?token=${encodeURIComponent(state.shareToken)}">⬇</a>` : ''}</td>
+        <td style="text-align:right">${!e.is_dir ? `<a class="btn" href="/sd/${encodeURIComponent(state.shareId)}${encodePath(sp)}?token=${encodeURIComponent(state.shareToken)}">⬇</a>` : ''}</td>
       </tr>`;
     }).join('') + `</tbody></table>`;
 }
 async function authPublicShare() {
   const password = document.getElementById('shAuthPw').value;
   const r = await api('/api/public/share/auth', {method:'POST', json:{share_id: state.shareId, password}});
-  if (r.code !== 200) { toast('❌ ' + r.message); return; }
+  if (r.code !== 200) { toast('Error:  ' + r.message); return; }
   state.shareToken = r.data.token;
   sessionStorage.setItem('share_tok', state.shareToken);
   loadPublicShare(state.shareSub);
@@ -611,6 +753,7 @@ async function authPublicShare() {
 
 // ADMIN CONSOLE
 async function toggleAdminView() {
+  if(state.telemetryTimer){clearInterval(state.telemetryTimer);state.telemetryTimer=null;}
   state.adminOpen = !state.adminOpen;
   document.getElementById('explorerView').style.display = state.adminOpen ? 'none' : 'block';
   document.getElementById('adminView').style.display = state.adminOpen ? 'block' : 'none';
@@ -625,6 +768,7 @@ async function toggleAdminView() {
   }
 }
 function switchAdminTab(tab, el) {
+  if(state.telemetryTimer){clearInterval(state.telemetryTimer);state.telemetryTimer=null;}
   document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
   if (el) el.classList.add('active');
   if (tab === 'storages') loadAdminStorages();
@@ -633,7 +777,13 @@ function switchAdminTab(tab, el) {
   else if (tab === 'metas') loadAdminMetas();
   else if (tab === 'shares') loadAdminShares();
   else if (tab === 'tasks') loadAdminTasks();
+  else if (tab === 'telemetry') loadAdminTelemetry();
   else if (tab === 'settings') loadAdminSettings();
+}
+async function loadAdminTelemetry(){
+  document.getElementById('adminPanelBody').innerHTML='<h3 style="margin-bottom:12px">Live system telemetry</h3><div id="telemetryGrid" class="grid-2"></div><small style="color:var(--muted)">Refreshes every 2 seconds. Counters are process-lifetime totals.</small>';
+  const refresh=async()=>{const r=await api('/api/admin/system/stats');if(r.code!==200)return;const d=r.data;const metrics=[['Version',d.version],['Uptime',`${Math.floor(d.uptime_sec/3600)}h ${Math.floor(d.uptime_sec%3600/60)}m`],['RSS',fmtSize(d.rss_bytes)],['Peak RSS',fmtSize(d.peak_rss_bytes)],['Threads',d.threads],['Connections',d.active_connections],['Requests',d.total_requests],['Network sent',fmtSize(d.bytes_sent)],['Network received',fmtSize(d.bytes_received)],['VFS cache hits / misses',`${d.vfs_cache_hits} / ${d.vfs_cache_misses}`],['Cache entries',d.vfs_cache_entries],['Mounted storages',d.mounted_storages],['DB size',fmtSize(d.db_size_bytes)],['Indexed files',d.fts_indexed_files],['Tasks active / done',`${d.tasks_undone} / ${d.tasks_done}`]];document.getElementById('telemetryGrid')?.replaceChildren(...metrics.map(([k,v])=>{const card=document.createElement('div');card.className='card';card.style.padding='12px';const label=document.createElement('small');label.style.color='var(--muted)';label.textContent=k;const value=document.createElement('div');value.style.fontWeight='650';value.textContent=v;card.append(label,value);return card;}));};
+  await refresh();state.telemetryTimer=setInterval(refresh,2000);
 }
 
 async function loadAdminStorages() {
@@ -649,29 +799,23 @@ async function loadAdminStorages() {
     <td><span class="badge">${esc(s.driver)}</span></td>
     <td style="color:${s.status==='work'?'var(--ok)':'var(--warn)'}">${esc(s.status)}</td>
     <td style="text-align:right"><div class="row-ops">
+      <button class="btn" onclick="openStorageModal(${s.id})">Edit</button>
       <button class="btn btn-danger" onclick="delStorage(${s.id})">Delete</button>
     </div></td>
   </tr>`).join('') + `</tbody></table>`;
 }
 
-function openStorageModal() {
-  const opts = state.drivers.map(d => `<option value="${esc(d.name)}">${esc(d.display_name || d.name)}</option>`).join('');
-  openModal(`<h3>Mount New Storage</h3>
-    <div class="grid-2">
-      <div class="field"><label>Mount Path</label><input class="input" id="stMount" placeholder="/local or /s3"></div>
-      <div class="field"><label>Driver</label><select class="input" id="stDrv" onchange="renderDriverFields()">${opts}</select></div>
-    </div>
-    <div class="grid-2">
-      <div class="field"><label>Cache TTL (minutes)</label><input class="input" type="number" id="stCache" value="30"></div>
-      <div class="field"><label>HMAC Sign Links</label><select class="input" id="stSign"><option value="false">No</option><option value="true">Yes (Signed URLs)</option></select></div>
-    </div>
-    <hr style="border-color:var(--border);margin:12px 0">
-    <div id="drvFields"></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
-      <button class="btn" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveStorage()">Mount</button>
-    </div>`);
+async function openStorageModal(id = 0) {
+  let s={mount_path:'',driver:state.drivers[0]?.name||'',cache_expiration:30,enable_sign:false,addition:'{}',order_by:'name',order_direction:'ASC'};
+  if(id){const r=await api('/api/admin/storage/get?id='+id);if(r.code!==200){toast(r.message||'Storage not found');return;}s=r.data;}
+  const opts = state.drivers.map(d => `<option value="${esc(d.name)}" ${d.name===s.driver?'selected':''}>${esc(d.display_name || d.name)}</option>`).join('');
+  openModal(`<h3>${id?'Edit':'Mount'} storage</h3><input type="hidden" id="stId" value="${id}">
+    <div class="grid-2"><div class="field"><label>Mount path</label><input class="input" id="stMount" value="${esc(s.mount_path)}" placeholder="/local or /s3"></div><div class="field"><label>Driver</label><select class="input" id="stDrv" onchange="renderDriverFields()">${opts}</select></div></div>
+    <div class="grid-2"><div class="field"><label>Cache TTL (minutes)</label><input class="input" type="number" id="stCache" value="${Number(s.cache_expiration)||0}"></div><div class="field"><label>HMAC sign links</label><select class="input" id="stSign"><option value="false" ${!s.enable_sign?'selected':''}>No</option><option value="true" ${s.enable_sign?'selected':''}>Yes</option></select></div></div>
+    <hr style="border-color:var(--border);margin:12px 0"><div id="drvFields"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveStorage()">${id?'Save changes':'Mount'}</button></div>`);
   renderDriverFields();
+  if(id){let addition={};try{addition=JSON.parse(s.addition||'{}')}catch{};document.querySelectorAll('#drvFields [data-df]').forEach(el=>{if(Object.prototype.hasOwnProperty.call(addition,el.dataset.df))el.value=String(addition[el.dataset.df]);});}
 }
 
 function renderDriverFields() {
@@ -702,10 +846,11 @@ async function saveStorage() {
     const k = el.getAttribute('data-df'), t = el.getAttribute('data-dt');
     add[k] = t === 'bool' ? (el.value === 'true') : (t === 'number' ? Number(el.value || 0) : el.value);
   });
-  const r = await api('/api/admin/storage/create', {method:'POST', json:{mount_path, driver, cache_expiration, enable_sign, addition: JSON.stringify(add)}});
-  if (r.code !== 200) { toast('❌ ' + r.message); return; }
+  const id = Number(document.getElementById('stId').value || 0);
+  const r = await api(id ? '/api/admin/storage/update' : '/api/admin/storage/create', {method:'POST', json:{id, mount_path, driver, cache_expiration, enable_sign, addition: JSON.stringify(add)}});
+  if (r.code !== 200) { toast('Error:  ' + r.message); return; }
   closeModal();
-  toast('✅ Storage mounted!');
+  toast(' Storage mounted!');
   loadAdminStorages();
 }
 
@@ -756,17 +901,36 @@ async function saveNewUser() {
     base_path: document.getElementById('nuBase').value.trim() || '/',
     role_ids: [2]
   }});
-  if (r.code !== 200) { toast('❌ ' + r.message); return; }
+  if (r.code !== 200) { toast('Error:  ' + r.message); return; }
   closeModal(); loadAdminUsers();
 }
 
+const rolePermissions = ['See hidden items','Bypass folder password','Queue offline downloads','Write','Rename','Move','Copy','Delete','WebDAV read','WebDAV manage','FTP access','FTP manage','Read archives','Extract archives','Limit paths','MCP access','MCP manage'];
 async function loadAdminRoles() {
   const r = await api('/api/admin/role/list');
   const items = r.data?.content || [];
-  document.getElementById('adminPanelBody').innerHTML = `<h3 style="margin-bottom:14px">RBAC Roles (${items.length})</h3>
-    <table><thead><tr><th>ID</th><th>Name</th><th>Description</th><th>Scopes</th></tr></thead><tbody>` +
-    items.map(ro => `<tr><td>${ro.id}</td><td><b>${esc(ro.name)}</b></td><td>${esc(ro.description)}</td><td><code>${esc(JSON.stringify(ro.permission_scopes))}</code></td></tr>`).join('') +
+  document.getElementById('adminPanelBody').innerHTML = `<div style="display:flex;justify-content:space-between;margin-bottom:14px"><h3>RBAC Roles (${items.length})</h3><button class="btn btn-primary" onclick="openRoleModal()">Create role</button></div>
+    <table><thead><tr><th>ID</th><th>Name</th><th>Description</th><th>Scopes</th><th>Actions</th></tr></thead><tbody>` +
+    items.map(ro => `<tr><td>${ro.id}</td><td><b>${esc(ro.name)}</b></td><td>${esc(ro.description)}</td><td>${ro.permission_scopes?.length||0}</td><td><button class="btn" onclick="openRoleModal(${ro.id})">Edit</button></td></tr>`).join('') +
     `</tbody></table>`;
+}
+function roleScopeHtml(scope = {}) {
+  const mask = Number(scope.permission) || 0;
+  return `<section class="role-scope card" style="padding:12px;margin:10px 0"><div style="display:flex;gap:8px"><input class="input scope-path" aria-label="Scope path" value="${esc(scope.path||'/')}" placeholder="/path"><button class="btn btn-danger" onclick="this.closest('.role-scope').remove()">Remove scope</button></div><div class="grid-2" style="margin-top:10px">${rolePermissions.map((label,bit)=>`<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" data-perm="${bit}" ${(mask & (1<<bit))?'checked':''}>${label}</label>`).join('')}</div></section>`;
+}
+async function openRoleModal(id = 0) {
+  let role = {name:'',description:'',permission_scopes:[{path:'/',permission:0}]};
+  if (id) { const r=await api('/api/admin/role/list'); role=(r.data?.content||[]).find(x=>x.id===id)||role; }
+  openModal(`<h3>${id?'Edit':'Create'} RBAC role</h3><div class="field"><label>Name</label><input class="input" id="roleName" value="${esc(role.name)}"></div><div class="field"><label>Description</label><input class="input" id="roleDescription" value="${esc(role.description)}"></div><div id="roleScopes">${(role.permission_scopes?.length?role.permission_scopes:[{path:'/',permission:0}]).map(roleScopeHtml).join('')}</div><button class="btn" onclick="addRoleScope()">Add path scope</button><div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveRole(${id})">Save role</button></div>`);
+}
+function addRoleScope() { document.getElementById('roleScopes').insertAdjacentHTML('beforeend',roleScopeHtml({path:'/',permission:0})); }
+async function saveRole(id) {
+  const permission_scopes=[...document.querySelectorAll('.role-scope')].map(row=>{let permission=0;row.querySelectorAll('[data-perm]').forEach(c=>{if(c.checked)permission|=1<<Number(c.dataset.perm)});return {path:row.querySelector('.scope-path').value.trim(),permission};}).filter(s=>s.path);
+  const payload={name:document.getElementById('roleName').value.trim(),description:document.getElementById('roleDescription').value.trim(),permission_scopes};
+  if(!payload.name){toast('Role name is required');return;}
+  const r=await api(id?'/api/admin/role/update':'/api/admin/role/create',{method:'POST',json:id?{...payload,id}:payload});
+  if(r.code!==200){toast('Role save failed: '+(r.message||'request failed'));return;}
+  closeModal();loadAdminRoles();
 }
 
 async function loadAdminMetas() {
@@ -777,31 +941,26 @@ async function loadAdminMetas() {
     <button class="btn btn-primary" onclick="openMetaModal()">+ Add Meta Rule</button>
   </div><table><thead><tr><th>Path</th><th>Password</th><th>Hide Globs</th><th style="text-align:right">Actions</th></tr></thead><tbody>` +
   items.map(m => `<tr><td><code>${esc(m.path)}</code></td><td>${m.password?'Protected':'-'}</td><td><code>${esc(m.hide)}</code></td>
-    <td style="text-align:right"><button class="btn btn-danger" onclick="api('/api/admin/meta/delete?id=${m.id}',{method:'POST'}).then(loadAdminMetas)">Delete</button></td></tr>`).join('') +
+    <td style="text-align:right"><button class="btn" onclick="openMetaModal(${m.id})">Edit</button> <button class="btn btn-danger" onclick="api('/api/admin/meta/delete?id=${m.id}',{method:'POST'}).then(loadAdminMetas)">Delete</button></td></tr>`).join('') +
   `</tbody></table>`;
 }
-function openMetaModal() {
-  openModal(`<h3>Add Path Meta Rule</h3>
-    <div class="field"><label>VFS Path</label><input class="input" id="mtPath" value="/local"></div>
-    <div class="field"><label>Folder Password</label><input class="input" id="mtPass"></div>
-    <div class="field"><label>Hide Patterns (newline separated globs, e.g. *.secret)</label><textarea class="input" id="mtHide"></textarea></div>
-    <div class="field"><label>README Text</label><textarea class="input" id="mtReadme"></textarea></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
-      <button class="btn" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveMeta()">Save</button>
-    </div>`);
+async function openMetaModal(id = 0) {
+  let m={path:'/local',password:'',p_sub:true,write:false,w_sub:false,hide:'',h_sub:true,readme:'',r_sub:true};
+  if(id){const r=await api('/api/admin/meta/list');m=(r.data?.content||[]).find(x=>x.id===id)||m;}
+  openModal(`<h3>${id?'Edit':'Add'} path meta rule</h3><input type="hidden" id="mtId" value="${id}">
+    <div class="field"><label>VFS path</label><input class="input" id="mtPath" value="${esc(m.path)}"></div>
+    <div class="field"><label>Folder password (leave ******** unchanged to preserve)</label><input class="input" id="mtPass" value="${esc(m.password||'')}"></div>
+    <div class="field"><label>Hide patterns (newline-separated globs)</label><textarea class="input" id="mtHide">${esc(m.hide||'')}</textarea></div>
+    <div class="field"><label>README text</label><textarea class="input" id="mtReadme">${esc(m.readme||'')}</textarea></div>
+    <div class="grid-2">${[['mtPSub','Protect subpaths','p_sub'],['mtWrite','Allow writes','write'],['mtWSub','Write on subpaths','w_sub'],['mtHSub','Apply hide rules to subpaths','h_sub'],['mtRSub','Show README on subpaths','r_sub']].map(([id,label,key])=>`<label><input type="checkbox" id="${id}" ${m[key]?'checked':''}> ${label}</label>`).join('')}</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveMeta()">Save rule</button></div>`);
 }
 async function saveMeta() {
-  const r = await api('/api/admin/meta/create', {method:'POST', json:{
-    path: document.getElementById('mtPath').value.trim(),
-    password: document.getElementById('mtPass').value,
-    p_sub: true,
-    hide: document.getElementById('mtHide').value,
-    h_sub: true,
-    readme: document.getElementById('mtReadme').value
-  }});
-  if (r.code !== 200) { toast('❌ ' + r.message); return; }
-  closeModal(); loadAdminMetas();
+  const id=Number(document.getElementById('mtId').value);
+  const payload={id,path:document.getElementById('mtPath').value.trim(),password:document.getElementById('mtPass').value,hide:document.getElementById('mtHide').value,readme:document.getElementById('mtReadme').value,p_sub:document.getElementById('mtPSub').checked,write:document.getElementById('mtWrite').checked,w_sub:document.getElementById('mtWSub').checked,h_sub:document.getElementById('mtHSub').checked,r_sub:document.getElementById('mtRSub').checked};
+  const r=await api(id?'/api/admin/meta/update':'/api/admin/meta/create',{method:'POST',json:payload});
+  if(r.code!==200){toast('Save failed: '+(r.message||'request failed'));return;}
+  closeModal();loadAdminMetas();
 }
 
 async function loadAdminShares() {
@@ -822,7 +981,7 @@ async function loadAdminTasks() {
   document.getElementById('adminPanelBody').innerHTML = `<div style="display:flex;justify-content:space-between;margin-bottom:14px">
     <h3>Background Tasks (${all.length})</h3>
     <div style="display:flex;gap:8px">
-      <button class="btn" onclick="loadAdminTasks()">↻ Refresh</button>
+      <button class="btn" onclick="loadAdminTasks()">Refresh</button>
       <button class="btn" onclick="api('/api/task/clear_done',{method:'POST'}).then(loadAdminTasks)">Clear Completed</button>
     </div>
   </div><table><thead><tr><th>ID</th><th>Name</th><th>State</th><th>Progress</th></tr></thead><tbody>` +
@@ -845,7 +1004,7 @@ async function loadAdminSettings() {
     <div>
       <h3 style="margin-bottom:12px">SQLite FTS5 Search Index</h3>
       <p style="color:var(--muted);margin-bottom:12px">Indexed entries: <b>${idx.data?.obj_count ?? 0}</b></p>
-      <button class="btn btn-primary" onclick="api('/api/admin/index/build',{method:'POST'}).then(()=>{toast('✅ Search index rebuilt!');loadAdminSettings();})">⚡ Rebuild Full Index Now</button>
+      <button class="btn btn-primary" onclick="api('/api/admin/index/build',{method:'POST'}).then(()=>{toast(' Search index rebuilt!');loadAdminSettings();})"> Rebuild Full Index Now</button>
     </div>
   </div>`;
 }
@@ -855,10 +1014,27 @@ async function saveSettings() {
     {key:'sign_all', value: document.getElementById('stSignAll').value},
     {key:'max_devices', value: document.getElementById('stMaxDev').value}
   ]});
-  toast('✅ Settings saved');
+  toast(' Settings saved');
   initApp();
 }
 
+document.addEventListener('keydown', event => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+    event.preventDefault(); openSearch();
+  } else if (event.key === 'Escape' && document.getElementById('modalBg').classList.contains('open')) {
+    closeModal();
+  }
+});
+const explorerDrop = document.getElementById('explorerView');
+['dragenter','dragover'].forEach(type => explorerDrop.addEventListener(type, event => {
+  event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'; explorerDrop.classList.add('drop-active');
+}));
+['dragleave','drop'].forEach(type => explorerDrop.addEventListener(type, event => {
+  event.preventDefault(); explorerDrop.classList.remove('drop-active');
+}));
+explorerDrop.addEventListener('drop', event => {
+  if (document.getElementById('writeToolbar').style.display !== 'none' && event.dataTransfer?.files?.length) uploadFiles(event.dataTransfer.files);
+});
 initApp();
 </script>
 </body>
