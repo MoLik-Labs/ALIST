@@ -8,6 +8,7 @@
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
+#include <limits>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/epoll.h>
@@ -78,6 +79,23 @@ namespace {
 
 constexpr size_t kMaxHeaderBytes        = 32768;
 constexpr size_t kMaxBufferedBodyBytes  = 8 * 1024 * 1024; // 8 MiB for JSON/XML control plane
+constexpr size_t kMaxChunkTrailerBytes  = 4096;
+
+bool parse_chunk_size(std::string_view text, size_t& result) noexcept {
+    if (text.empty()) return false;
+    size_t value = 0;
+    for (unsigned char ch : text) {
+        size_t digit;
+        if (ch >= '0' && ch <= '9') digit = ch - '0';
+        else if (ch >= 'a' && ch <= 'f') digit = ch - 'a' + 10;
+        else if (ch >= 'A' && ch <= 'F') digit = ch - 'A' + 10;
+        else return false;
+        if (value > (std::numeric_limits<size_t>::max() - digit) / 16) return false;
+        value = value * 16 + digit;
+    }
+    result = value;
+    return true;
+}
 
 const char* default_reason_phrase(int code) noexcept {
     switch (code) {
@@ -107,10 +125,10 @@ const char* default_reason_phrase(int code) noexcept {
     }
 }
 
-bool send_all(int fd, const char* data, size_t len) {
+bool send_all_flags(int fd, const char* data, size_t len, int extra_flags, std::atomic<uint64_t>* bytes_counter = nullptr) {
     size_t sent = 0;
     while (sent < len) {
-        ssize_t n = ::send(fd, data + sent, len - sent, MSG_NOSIGNAL);
+        ssize_t n = ::send(fd, data + sent, len - sent, MSG_NOSIGNAL | extra_flags);
         if (n < 0) {
             if (errno == EINTR) continue;
             return false;
@@ -118,12 +136,17 @@ bool send_all(int fd, const char* data, size_t len) {
         if (n == 0) return false;
         sent += static_cast<size_t>(n);
     }
+    if (bytes_counter && sent > 0) bytes_counter->fetch_add(sent, std::memory_order_relaxed);
     return true;
+}
+
+bool send_all(int fd, const char* data, size_t len, std::atomic<uint64_t>* bytes_counter = nullptr) {
+    return send_all_flags(fd, data, len, 0, bytes_counter);
 }
 
 class SocketReader {
 public:
-    explicit SocketReader(int fd) : fd_(fd) {}
+    SocketReader(int fd, std::atomic<uint64_t>* rx_counter = nullptr) : fd_(fd), rx_counter_(rx_counter) {}
 
     bool read_until(std::string_view delim, std::string& out, size_t max_bytes) {
         out.clear();
@@ -162,6 +185,7 @@ public:
         while (true) {
             ssize_t n = ::recv(fd_, dst, max_len, 0);
             if (n < 0 && errno == EINTR) continue;
+            if (n > 0 && rx_counter_) rx_counter_->fetch_add(static_cast<uint64_t>(n), std::memory_order_relaxed);
             return n;
         }
     }
@@ -178,6 +202,7 @@ public:
 
 private:
     int fd_;
+    std::atomic<uint64_t>* rx_counter_ = nullptr;
     std::string buf_;
     size_t pos_ = 0;
 
@@ -187,6 +212,7 @@ private:
             ssize_t n = ::recv(fd_, tmp, sizeof(tmp), 0);
             if (n < 0 && errno == EINTR) continue;
             if (n <= 0) return false;
+            if (rx_counter_) rx_counter_->fetch_add(static_cast<uint64_t>(n), std::memory_order_relaxed);
             buf_.append(tmp, static_cast<size_t>(n));
             return true;
         }
@@ -202,6 +228,18 @@ private:
         }
     }
 };
+
+bool drain_chunk_trailers(SocketReader& reader) {
+    size_t total = 0;
+    while (total < kMaxChunkTrailerBytes) {
+        std::string line;
+        if (!reader.read_until("\r\n", line, kMaxChunkTrailerBytes - total)) return false;
+        total += line.size();
+        if (line == "\r\n") return true;
+        if (line.size() < 2 || line.substr(line.size() - 2) != "\r\n") return false;
+    }
+    return false;
+}
 
 void parse_query_map(std::string_view q, std::map<std::string, std::string>& out) {
     for (auto pair_sv : split_sv(q, '&', true)) {
@@ -291,6 +329,7 @@ bool HttpServer::start() {
     ev2.data.fd = wakeup_fd_;
     ::epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, wakeup_fd_, &ev2);
 
+    started_at_unix_.store(unix_now(), std::memory_order_relaxed);
     running_.store(true);
     for (int i = 0; i < num_workers_; ++i) {
         workers_.emplace_back([this] { worker_loop(); });
@@ -397,7 +436,7 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
     timeval stv{60, 0};
     ::setsockopt(fd.get(), SOL_SOCKET, SO_SNDTIMEO, &stv, sizeof(stv));
 
-    SocketReader reader(fd.get());
+    SocketReader reader(fd.get(), &bytes_received_);
     int req_count = 0;
 
     while (running_.load(std::memory_order_relaxed) && req_count < 500) {
@@ -450,8 +489,11 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
                 if (!cl_opt || *cl_opt < 0) { malformed_hdr = true; break; }
                 req.content_length = *cl_opt;
             } else if (key == "transfer-encoding") {
+                if (has_te) { malformed_hdr = true; break; } // Reject duplicate framing headers.
                 has_te = true;
-                if (to_lower_ascii(val).find("chunked") != std::string::npos) {
+                // This server implements only a single chunked coding; accepting a substring
+                // (e.g. "notchunked" or "gzip, chunked") creates parser differentials.
+                if (iequals_ascii(trim_ascii(val), "chunked")) {
                     req.is_chunked = true;
                 } else {
                     malformed_hdr = true;
@@ -468,11 +510,18 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
             break;
         }
 
-        // Trust X-Forwarded-For first hop when behind reverse proxy / Arena preview proxy
-        if (auto xff = req.header("x-forwarded-for"); !xff.empty()) {
-            auto comma = xff.find(',');
-            req.remote_ip = std::string(trim_ascii(comma == std::string::npos ? std::string_view(xff) : std::string_view(xff).substr(0, comma)));
+        // Security: Only honor X-Forwarded-For when trust_proxy_ is explicitly enabled
+        // (prevents untrusted clients from spoofing X-Forwarded-For to bypass IP rate limits!)
+        if (trust_proxy_) {
+            if (auto xff = req.header("x-forwarded-for"); !xff.empty()) {
+                auto comma = xff.find(',');
+                auto candidate = trim_ascii(comma == std::string::npos ? std::string_view(xff) : std::string_view(xff).substr(0, comma));
+                if (!candidate.empty() && candidate.size() < 64) {
+                    req.remote_ip = std::string(candidate);
+                }
+            }
         }
+        total_requests_.fetch_add(1, std::memory_order_relaxed);
 
         auto qpos = req.raw_target.find('?');
         if (qpos == std::string::npos) {
@@ -499,10 +548,8 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
             ::setsockopt(fd.get(), SOL_SOCKET, SO_RCVTIMEO, &up_tv, sizeof(up_tv));
 
             if (req.is_chunked) {
-                size_t chunk_rem = 0;
-                bool chunk_eof = false;
                 body_fully_drained = false;
-                req.stream_body = [&](char* dst, size_t max_len) -> ssize_t {
+                req.stream_body = [&, chunk_rem = size_t{0}, chunk_eof = false](char* dst, size_t max_len) mutable -> ssize_t {
                     if (chunk_eof) return 0;
                     if (chunk_rem == 0) {
                         std::string sz_line;
@@ -514,16 +561,9 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
                         sv = trim_ascii(sv);
                         if (sv.empty()) return -1;
                         size_t csz = 0;
-                        for (char ch : sv) {
-                            csz <<= 4;
-                            if (ch >= '0' && ch <= '9') csz |= static_cast<size_t>(ch - '0');
-                            else if (ch >= 'a' && ch <= 'f') csz |= static_cast<size_t>(ch - 'a' + 10);
-                            else if (ch >= 'A' && ch <= 'F') csz |= static_cast<size_t>(ch - 'A' + 10);
-                            else return -1;
-                        }
+                        if (!parse_chunk_size(sv, csz)) return -1;
                         if (csz == 0) {
-                            std::string trl;
-                            reader.read_until("\r\n", trl, 4096);
+                            if (!drain_chunk_trailers(reader)) return -1;
                             chunk_eof = true;
                             body_fully_drained = true;
                             return 0;
@@ -565,18 +605,12 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
                     auto semi = sv.find(';');
                     if (semi != std::string_view::npos) sv = sv.substr(0, semi);
                     size_t csz = 0;
-                    bool ok_hex = !sv.empty();
-                    for (char ch : sv) {
-                        csz <<= 4;
-                        if (ch >= '0' && ch <= '9') csz |= static_cast<size_t>(ch - '0');
-                        else if (ch >= 'a' && ch <= 'f') csz |= static_cast<size_t>(ch - 'a' + 10);
-                        else if (ch >= 'A' && ch <= 'F') csz |= static_cast<size_t>(ch - 'A' + 10);
-                        else { ok_hex = false; break; }
+                    if (!parse_chunk_size(sv, csz) || csz > kMaxBufferedBodyBytes - req.body.size()) {
+                        body_fully_drained = false;
+                        break;
                     }
-                    if (!ok_hex || req.body.size() + csz > kMaxBufferedBodyBytes) { body_fully_drained = false; break; }
                     if (csz == 0) {
-                        std::string trl;
-                        reader.read_until("\r\n", trl, 4096);
+                        if (!drain_chunk_trailers(reader)) body_fully_drained = false;
                         break;
                     }
                     size_t old_sz = req.body.size();
@@ -604,7 +638,7 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
         HttpResponse resp;
         // Baseline security headers (Note: no X-Frame-Options: DENY on UI so live iframe preview works cleanly!)
         resp.headers["X-Content-Type-Options"] = "nosniff";
-        resp.headers["Server"] = "AList-Core/4.0";
+        resp.headers["Server"] = "AList-nggkhaiz/4.1";
 
         if (handler_) {
             try {
@@ -676,23 +710,25 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
                 std::string wire = "HTTP/1.1 " + std::to_string(resp.status) + " " + reason + "\r\n";
                 for (const auto& [k, v] : resp.headers) wire += k + ": " + v + "\r\n";
                 wire += "\r\n";
-                if (!send_all(fd.get(), wire.data(), wire.size())) break;
+                // Coalesce HTTP response headers with the first sendfile64() kernel page via MSG_MORE!
+                int hdr_flags = (!is_head && send_len > 0) ? MSG_MORE : 0;
+                if (!send_all_flags(fd.get(), wire.data(), wire.size(), hdr_flags, &bytes_sent_)) break;
 
                 if (!is_head && send_len > 0) {
                     off_t sf_off = static_cast<off_t>(offset);
                     int64_t rem = send_len;
                     bool send_ok = true;
+                    const int64_t max_slice = (download_limiter_ && download_limiter_->rate() > 0) ? 262144 : 1048576; // 1 MiB zero-copy slices!
                     while (rem > 0) {
-                        size_t chunk = static_cast<size_t>(std::min<int64_t>(rem, 262144)); // 256 KiB slices
+                        size_t chunk = static_cast<size_t>(std::min<int64_t>(rem, max_slice));
                         if (download_limiter_) download_limiter_->consume(chunk);
                         ssize_t n = ::sendfile(fd.get(), ffd.get(), &sf_off, chunk);
                         if (n < 0) {
                             if (errno == EINTR) continue;
                             if (errno == EINVAL || errno == ENOSYS) {
-                                // Fallback to pread+send if underlying FS lacks sendfile
                                 std::vector<char> fbuf(chunk);
                                 ssize_t rn = ::pread(ffd.get(), fbuf.data(), chunk, sf_off);
-                                if (rn <= 0 || !send_all(fd.get(), fbuf.data(), static_cast<size_t>(rn))) {
+                                if (rn <= 0 || !send_all(fd.get(), fbuf.data(), static_cast<size_t>(rn), &bytes_sent_)) {
                                     send_ok = false;
                                     break;
                                 }
@@ -704,6 +740,7 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
                             break;
                         }
                         if (n == 0) break;
+                        bytes_sent_.fetch_add(static_cast<uint64_t>(n), std::memory_order_relaxed);
                         rem -= n;
                     }
                     if (!send_ok) break;
@@ -725,7 +762,7 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
             std::string wire = "HTTP/1.1 " + std::to_string(resp.status) + " " + reason + "\r\n";
             for (const auto& [k, v] : resp.headers) wire += k + ": " + v + "\r\n";
             wire += "\r\n";
-            if (!send_all(fd.get(), wire.data(), wire.size())) break;
+            if (!send_all(fd.get(), wire.data(), wire.size(), &bytes_sent_)) break;
 
             if (!is_head) {
                 bool ok = resp.stream_writer([&](const char* data, size_t len) -> bool {
@@ -734,14 +771,14 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
                     if (use_chunked_out) {
                         char hexbuf[32];
                         int hn = std::snprintf(hexbuf, sizeof(hexbuf), "%zx\r\n", len);
-                        if (!send_all(fd.get(), hexbuf, static_cast<size_t>(hn))) return false;
-                        if (!send_all(fd.get(), data, len)) return false;
-                        return send_all(fd.get(), "\r\n", 2);
+                        if (!send_all(fd.get(), hexbuf, static_cast<size_t>(hn), &bytes_sent_)) return false;
+                        if (!send_all(fd.get(), data, len, &bytes_sent_)) return false;
+                        return send_all(fd.get(), "\r\n", 2, &bytes_sent_);
                     }
-                    return send_all(fd.get(), data, len);
+                    return send_all(fd.get(), data, len, &bytes_sent_);
                 });
                 if (!ok) break;
-                if (use_chunked_out && !send_all(fd.get(), "0\r\n\r\n", 5)) break;
+                if (use_chunked_out && !send_all(fd.get(), "0\r\n\r\n", 5, &bytes_sent_)) break;
             }
             if (want_close) break;
             continue;
@@ -779,7 +816,7 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
         if (!is_head && !resp.body.empty()) {
             wire += resp.body;
         }
-        if (!send_all(fd.get(), wire.data(), wire.size())) break;
+        if (!send_all(fd.get(), wire.data(), wire.size(), &bytes_sent_)) break;
         if (want_close) break;
     }
 }

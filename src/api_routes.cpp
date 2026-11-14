@@ -6,13 +6,70 @@
 #include "alist/version.hpp"
 #include "alist/web_ui.hpp"
 
+#include <algorithm>
 #include <fcntl.h>
 #include <filesystem>
+#include <fstream>
+#include <limits>
+#include <thread>
 #include <unistd.h>
 
 namespace alist {
 
 namespace {
+
+int bounded_json_int(const JsonValue& value, int fallback, int min_value, int max_value) {
+    const int64_t raw = value.as_i64(fallback);
+    return static_cast<int>(std::clamp<int64_t>(raw, min_value, max_value));
+}
+
+struct ProcTelemetry {
+    int64_t rss_bytes = 0;
+    int64_t peak_rss_bytes = 0;
+    int threads = 1;
+};
+
+ProcTelemetry read_proc_telemetry() {
+    ProcTelemetry t;
+    std::ifstream ifs("/proc/self/status");
+    std::string line;
+    while (std::getline(ifs, line)) {
+        if (line.starts_with("VmRSS:")) {
+            auto sv = trim_ascii(std::string_view(line).substr(6));
+            auto sp = sv.find(' ');
+            if (auto kb = parse_i64(sp == std::string_view::npos ? sv : sv.substr(0, sp))) {
+                t.rss_bytes = *kb * 1024;
+            }
+        } else if (line.starts_with("VmHWM:")) {
+            auto sv = trim_ascii(std::string_view(line).substr(6));
+            auto sp = sv.find(' ');
+            if (auto kb = parse_i64(sp == std::string_view::npos ? sv : sv.substr(0, sp))) {
+                t.peak_rss_bytes = *kb * 1024;
+            }
+        } else if (line.starts_with("Threads:")) {
+            if (auto th = parse_i64(trim_ascii(std::string_view(line).substr(8)))) {
+                t.threads = static_cast<int>(*th);
+            }
+        }
+    }
+    return t;
+}
+
+std::string merge_masked_addition(std::string_view old_plain_json, const JsonValue& incoming_add) {
+    auto old_j = JsonValue::parse(old_plain_json);
+    JsonValue new_j = incoming_add.is_object()
+                          ? incoming_add
+                          : JsonValue::parse(incoming_add.as_sv("{}")).value_or(JsonValue::object());
+    if (!new_j.is_object()) return std::string(old_plain_json);
+    if (old_j && old_j->is_object()) {
+        for (const auto& [k, old_v] : old_j->as_object()) {
+            if (new_j.contains(k) && new_j.get(k).is_string() && new_j.get(k).as_sv() == "********") {
+                new_j[k] = old_v;
+            }
+        }
+    }
+    return new_j.dump();
+}
 
 void json_ok(HttpResponse& resp, JsonValue data = nullptr, std::string_view message = "success") {
     JsonValue env = JsonValue::object({
@@ -54,7 +111,8 @@ ApiRouter::ApiRouter(AppConfig& cfg, Database& db, VfsEngine& vfs, TaskManager& 
       tasks_(tasks),
       down_limiter_(cfg.download_rate_limit_bps),
       up_limiter_(cfg.upload_rate_limit_bps),
-      webdav_(vfs, login_bf_, up_limiter_) {
+      webdav_(vfs, login_bf_, up_limiter_),
+      boot_unix_(unix_now()) {
     if (auto gz = gzip_compress(kEmbeddedWebUiHtml, 9)) {
         precompressed_ui_gzip_ = std::move(*gz);
     }
@@ -88,7 +146,12 @@ void ApiRouter::serve_spa(const HttpRequest& req, HttpResponse& resp) const {
 std::optional<ApiRouter::AuthContext> ApiRouter::authenticate(
     const HttpRequest& req, HttpResponse& resp, bool allow_guest) {
 
-    std::string token = req.header("authorization");
+    std::string raw_auth = req.header("authorization");
+    std::string_view tok_sv = trim_ascii(raw_auth);
+    if (tok_sv.size() > 7 && (tok_sv.starts_with("Bearer ") || tok_sv.starts_with("bearer "))) {
+        tok_sv = trim_ascii(tok_sv.substr(7));
+    }
+    std::string token(tok_sv);
     std::string client_id = req.header("client-id");
     if (client_id.empty()) client_id = req.query_param("client_id", "default");
 
@@ -358,6 +421,8 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
         data["version"] = kVersion;
         data["web_version"] = kWebVersion;
         data["engine"] = kEngine;
+        data["author"] = kAuthor;
+        data["author_url"] = kAuthorUrl;
         json_ok(resp, std::move(data));
         return;
     }
@@ -552,9 +617,25 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
     if (req.path == "/api/auth/2fa/generate" && req.method == "POST") {
         if (user.is_guest()) { json_err(resp, 403, "Forbidden"); return; }
         std::string sec = totp_generate_secret();
-        std::string uri = "otpauth://totp/AList-Core:" + url_encode(user.username) +
-                          "?secret=" + sec + "&issuer=AList-Core";
+        std::string uri = "otpauth://totp/AList%20%40nggkhaiz:" + url_encode(user.username) +
+                          "?secret=" + sec + "&issuer=nggkhaiz";
         json_ok(resp, JsonValue::object({{"secret", sec}, {"qr", uri}}));
+        return;
+    }
+
+    if (req.path == "/api/auth/2fa/cancel" && req.method == "POST") {
+        if (user.is_guest()) { json_err(resp, 403, "Forbidden"); return; }
+        auto body = parse_body_or_empty(req);
+        std::string code = body.get("code").as_str();
+        int64_t step = -1;
+        if (!user.otp_secret.empty() &&
+            (!totp_verify(user.otp_secret, code, unix_now(), &step) ||
+             !db_.verify_and_advance_otp_step(user.id, step))) {
+            json_err(resp, 400, "Valid 6-digit 2FA code required to disable 2FA");
+            return;
+        }
+        db_.update_user_otp(user.id, "", -1);
+        json_ok(resp);
         return;
     }
 
@@ -605,8 +686,8 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
         std::string req_p = body.get("path").as_str(req.query_param("path", "/"));
         std::string pw    = body.get("password").as_str(req.header("password"));
         bool refresh      = body.get("refresh").as_bool(false);
-        int page          = static_cast<int>(body.get("page").as_i64(1));
-        int per_page      = static_cast<int>(body.get("per_page").as_i64(0));
+        int page          = bounded_json_int(body.get("page"), 1, 1, std::numeric_limits<int>::max());
+        int per_page      = bounded_json_int(body.get("per_page"), 0, 0, 500);
 
         auto gvpath = vfs_.resolve_user_path(user, req_p);
         if (!gvpath) { json_err(resp, 403, "Invalid path"); return; }
@@ -623,9 +704,13 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
 
         int64_t total = static_cast<int64_t>(filtered.size());
         size_t start = 0, end = filtered.size();
-        if (per_page > 0 && page >= 1) {
-            start = std::min<size_t>(filtered.size(), static_cast<size_t>(page - 1) * static_cast<size_t>(per_page));
-            end   = std::min<size_t>(filtered.size(), start + static_cast<size_t>(per_page));
+        if (per_page > 0) {
+            const size_t page_index = static_cast<size_t>(page - 1);
+            const size_t page_size = static_cast<size_t>(per_page);
+            start = (page_index > filtered.size() / page_size)
+                        ? filtered.size()
+                        : std::min(filtered.size(), page_index * page_size);
+            end = start + std::min(page_size, filtered.size() - start);
         }
         JsonValue arr = JsonValue::array();
         for (size_t i = start; i < end; ++i) arr.push_back(filtered[i]->to_json());
@@ -668,9 +753,9 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
         auto body = parse_body_or_empty(req);
         std::string parent_req = body.get("parent").as_str("/");
         std::string keywords   = body.get("keywords").as_str();
-        int scope              = static_cast<int>(body.get("scope").as_i64(0));
-        int page               = static_cast<int>(body.get("page").as_i64(1));
-        int per_page           = static_cast<int>(body.get("per_page").as_i64(50));
+        int scope              = bounded_json_int(body.get("scope"), 0, 0, 2);
+        int page               = bounded_json_int(body.get("page"), 1, 1, std::numeric_limits<int>::max());
+        int per_page           = bounded_json_int(body.get("per_page"), 50, 1, 500);
 
         auto gparent = vfs_.resolve_user_path(user, parent_req);
         if (!gparent || !vfs_.can_read_path(user, *gparent, body.get("password").as_str())) {
@@ -1073,7 +1158,63 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
             return;
         }
 
+        if (req.path == "/api/admin/system/stats") {
+            auto pt = read_proc_telemetry();
+            HttpServer::Stats hs = server_ ? server_->stats() : HttpServer::Stats{};
+            int64_t started = hs.started_at_unix > 0 ? hs.started_at_unix : boot_unix_;
+            int64_t uptime = std::max<int64_t>(0, unix_now() - started);
+            auto undone = tasks_.list_tasks("", false);
+            auto done   = tasks_.list_tasks("", true);
+            json_ok(resp, JsonValue::object({
+                {"app_name",           kAppName},
+                {"author",             kAuthor},
+                {"author_url",         kAuthorUrl},
+                {"version",            kVersion},
+                {"engine",             kEngine},
+                {"uptime_sec",         uptime},
+                {"rss_bytes",          pt.rss_bytes},
+                {"peak_rss_bytes",     pt.peak_rss_bytes},
+                {"threads",            pt.threads},
+                {"cpu_cores",          static_cast<int64_t>(std::max(1u, std::thread::hardware_concurrency()))},
+                {"active_connections", hs.active_connections},
+                {"total_requests",     static_cast<int64_t>(hs.total_requests)},
+                {"bytes_sent",         static_cast<int64_t>(hs.bytes_sent)},
+                {"bytes_received",     static_cast<int64_t>(hs.bytes_received)},
+                {"vfs_cache_hits",     static_cast<int64_t>(vfs_.cache_hits())},
+                {"vfs_cache_misses",   static_cast<int64_t>(vfs_.cache_misses())},
+                {"vfs_cache_entries",  static_cast<int64_t>(vfs_.cache_size())},
+                {"mounted_storages",   static_cast<int64_t>(vfs_.mounted_count())},
+                {"db_size_bytes",      db_.db_file_size_bytes()},
+                {"fts_indexed_files",  db_.count_search_index()},
+                {"tasks_undone",       static_cast<int64_t>(undone.size())},
+                {"tasks_done",         static_cast<int64_t>(done.size())},
+            }));
+            return;
+        }
+
         // Storages CRUD
+        if (req.path == "/api/admin/storage/get") {
+            int64_t id = parse_i64(req.query_param("id")).value_or(0);
+            auto s = db_.get_storage(id);
+            if (!s) { json_err(resp, 404, "Storage not found"); return; }
+            json_ok(resp, JsonValue::object({
+                {"id",               s->id},
+                {"mount_path",       s->mount_path},
+                {"order",            s->order_idx},
+                {"driver",           s->driver},
+                {"cache_expiration", s->cache_expiration},
+                {"status",           s->status},
+                {"addition",         mask_sensitive_json(s->addition)},
+                {"remark",           s->remark},
+                {"disabled",         s->disabled},
+                {"enable_sign",      s->enable_sign},
+                {"order_by",         s->order_by},
+                {"order_direction",  s->order_direction},
+                {"web_proxy",        s->web_proxy},
+                {"webdav_policy",    s->webdav_policy},
+            }));
+            return;
+        }
         if (req.path == "/api/admin/storage/list") {
             auto list = db_.list_storages(false);
             JsonValue arr = JsonValue::array();
@@ -1089,6 +1230,8 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
                     {"remark",           s.remark},
                     {"disabled",         s.disabled},
                     {"enable_sign",      s.enable_sign},
+                    {"order_by",         s.order_by},
+                    {"order_direction",  s.order_direction},
                     {"web_proxy",        s.web_proxy},
                     {"webdav_policy",    s.webdav_policy},
                 }));
@@ -1124,19 +1267,23 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
             if (!existing) { json_err(resp, 404, "Storage not found"); return; }
             std::string old_mp = existing->mount_path;
             existing->mount_path       = b.get("mount_path").as_str(existing->mount_path);
+            existing->order_idx        = static_cast<int>(b.get("order").as_i64(existing->order_idx));
             existing->driver           = b.get("driver").as_str(existing->driver);
             existing->cache_expiration = static_cast<int>(b.get("cache_expiration").as_i64(existing->cache_expiration));
+            existing->remark           = b.get("remark").as_str(existing->remark);
+            existing->order_by         = b.get("order_by").as_str(existing->order_by);
+            existing->order_direction  = b.get("order_direction").as_str(existing->order_direction);
             if (b.contains("addition")) {
-                existing->addition = b.get("addition").is_object() ? b.get("addition").dump() : b.get("addition").as_str();
+                existing->addition = merge_masked_addition(existing->addition, b.get("addition"));
             }
             existing->disabled    = b.get("disabled").as_bool(existing->disabled);
             existing->enable_sign = b.get("enable_sign").as_bool(existing->enable_sign);
             existing->web_proxy   = b.get("web_proxy").as_bool(existing->web_proxy);
             if (!db_.update_storage(*existing)) { json_err(resp, 400, "Update failed"); return; }
-            if (old_mp != existing->mount_path) vfs_.unload_storage_path(old_mp);
+            if (old_mp != existing->mount_path || existing->disabled) vfs_.unload_storage_path(old_mp);
             std::string err;
-            vfs_.reload_storage(id, &err);
-            json_ok(resp);
+            if (!existing->disabled) vfs_.reload_storage(id, &err);
+            json_ok(resp, JsonValue::object({{"warning", err}}));
             return;
         }
         if (req.path == "/api/admin/storage/delete" && req.method == "POST") {
@@ -1313,6 +1460,27 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
             json_ok(resp, JsonValue::object({{"id", id}}));
             return;
         }
+        if (req.path == "/api/admin/meta/update" && req.method == "POST") {
+            auto b = parse_body_or_empty(req);
+            int64_t id = b.get("id").as_i64(0);
+            auto ex = db_.get_meta(id);
+            if (!ex) { json_err(resp, 404, "Meta rule not found"); return; }
+            ex->path = b.get("path").as_str(ex->path);
+            if (b.contains("password")) {
+                std::string np = b.get("password").as_str();
+                if (np != "********") ex->password = np;
+            }
+            ex->p_sub  = b.get("p_sub").as_bool(ex->p_sub);
+            ex->write  = b.get("write").as_bool(ex->write);
+            ex->w_sub  = b.get("w_sub").as_bool(ex->w_sub);
+            ex->hide   = b.get("hide").as_str(ex->hide);
+            ex->h_sub  = b.get("h_sub").as_bool(ex->h_sub);
+            ex->readme = b.get("readme").as_str(ex->readme);
+            ex->r_sub  = b.get("r_sub").as_bool(ex->r_sub);
+            if (!db_.update_meta(*ex)) { json_err(resp, 400, "Failed updating meta"); return; }
+            json_ok(resp);
+            return;
+        }
         if (req.path == "/api/admin/meta/delete" && req.method == "POST") {
             int64_t id = parse_i64(req.query_param("id")).value_or(parse_body_or_empty(req).get("id").as_i64(0));
             db_.delete_meta(id);
@@ -1346,7 +1514,7 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
             return;
         }
         if (req.path == "/api/admin/setting/reset_token" && req.method == "POST") {
-            std::string nt = "alist-" + random_hex(24);
+            std::string nt = "nggkhaiz-" + random_hex(24);
             db_.set_setting("token", nt, "global", false);
             json_ok(resp, JsonValue::object({{"token", nt}}));
             return;

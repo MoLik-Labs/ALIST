@@ -1,0 +1,9 @@
+.git
+.github
+build
+alist
+*.db
+*.db-shm
+*.db-wal
+data
+Unselected files

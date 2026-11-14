@@ -1,23 +1,26 @@
-# AList-Core (`v4.0.0-standalone`)
+# AList @nggkhaiz (`v4.1.0-nggkhaiz`)
 
-**AList-Core** is an independent, ground-up **C++20** standalone rewrite of AList engineered for minimal binary size, minimal RAM footprint, deterministic zero-GC latency, kernel zero-copy throughput, and defense-in-depth security.
+**AList @nggkhaiz** is an independent, ground-up **C++20** standalone rewrite of AList engineered for minimal binary size, minimal RAM footprint, deterministic zero-GC latency, kernel zero-copy throughput, and defense-in-depth security.
 
 ---
 
-## Why AList-Core? (Measured Footprint & Performance)
+## Performance Snapshot (Host-Specific)
 
-Benchmarked on a 2-vCPU Linux x86_64 instance (`g++ 12.2 -std=c++20 -O3 -flto -fPIE -pie -Wl,-z,relro,-z,now`):
+One recent `make -j2 bench` run in the development sandbox, using the release benchmark target, reported the following. These are reproducibility figures—not guaranteed production throughput, cross-project comparisons, or claims that each latest code change caused the measured values. Results depend on CPU, kernel, compiler, libraries, and load.
 
-| Metric | Legacy Go AList v3 | AList-Core (`v4.0.0-standalone`) | Improvement |
-| :--- | :--- | :--- | :--- |
-| **Stripped Standalone Binary** | ~130 MB | **879 KB** (includes embedded Web SPA) | **~148x smaller** |
-| **Cold Idle Memory (`VmRSS`)** | ~45–80 MB | **~6.9 MB** (`7,080 KB`, zero GC) | **~8–10x lower RAM** |
-| **Active Loaded Memory (`VmRSS`)** | ~180–400+ MB | **~20.7 MB** (10k FTS5 index + 512 MiB stream) | **~10x lower RAM** |
-| **Local File Download Path** | Userspace copy | **Linux `sendfile64()` kernel zero-copy** | **7,090 MiB/s (59.5 Gbps)** |
-| **HTTP/1.1 Keep-Alive `epoll`** | `net/http` goroutines | **Non-blocking `epoll` + `eventfd` pool** | **123,200+ req/s (2 vCPU)** |
-| **64-Shard VFS Cache** | Single mutex / shared slice | **64-shard LRU + `Singleflight` snapshots** | **9.27M lookups/s** |
-| **Crypt Stream Encryption** | Userspace stream | **OpenSSL 3 EVP AES-256-GCM (64 KiB O(1) seek)** | **4,368 MiB/s (4.37 GiB/s)** |
-| **Full-Text Search (10k files)** | Optional external / DB scan | **SQLite3 WAL + FTS5 (`unicode61` diacritics)** | **13,880+ queries/s (72 µs)** |
+| Metric | Measured result |
+| :--- | :--- |
+| Stripped standalone binary | 944 KB on this build |
+| Initial process RSS | 7.04 MB |
+| Loaded server RSS | 21.12 MB |
+| 64-shard cache lookups | 8.99 M ops/s |
+| AES-256-GCM encryption | 3,909 MiB/s |
+| HS256 JWT verification | 219,885 verifications/s |
+| SQLite FTS5, 10k files | 9,892 queries/s |
+| HTTP/1.1 keep-alive | 180,378 req/s |
+| `sendfile64()` stream | 8,455.9 MiB/s (70.93 Gbps) |
+
+For a fresh measurement on your host, run `make -j2 bench`.
 
 ---
 
@@ -34,7 +37,7 @@ Benchmarked on a 2-vCPU Linux x86_64 instance (`g++ 12.2 -std=c++20 -O3 -flto -f
    - **RFC 4918 WebDAV Server** (`/dav/*`: `OPTIONS`, `PROPFIND`, `PROPPATCH`, `GET`, `HEAD`, streaming `PUT`, `MKCOL`, `DELETE`, `COPY`, `MOVE`, `LOCK`, `UNLOCK`).
    - **Signed Direct & Proxy Streaming** (`/d/*`, `/p/*`, `/ad/*` ZIP single-entry extraction) with RFC 7233 `Range` (`206 Partial Content` / `416`), `ETag` (`304`), and token-bucket rate limiting.
    - **Public Link Sharing** (`/s/:id`, `/sd/:id`, `/sp/:id`) with PBKDF2 passwords, expiration timestamps, and atomic SQLite `max_downloads` quota enforcement.
-   - **Embedded Zero-CDN Single-Page Web UI** (`< 30 KB` pre-gzipped in binary): dark/light mode, breadcrumbs, video/audio/image/markdown/code previews, ZIP archive browser, FTS5 search modal, share manager, 2FA setup, and full Admin Console.
+   - **Embedded Zero-CDN Single-Page Web UI**: dark/light mode, breadcrumbs, video/audio/image/markdown/code previews, ZIP archive browser, FTS5 search modal, share manager, 2FA setup, and full Admin Console.
 
 ---
 
@@ -97,6 +100,12 @@ make -j"$(nproc)" bench
 ```bash
 docker compose up -d --build
 ```
+
+The image defaults to an unprivileged `alist` account (`PUID=10001`, `PGID=10001`). Keep `/opt/alist/data` on persistent storage; it contains the SQLite database, signing key, and configured storage metadata. Compose persists it at `./data`. Set `PUID`/`PGID` to match ownership requirements on the host. Do not publish the service directly to an untrusted network without TLS termination and appropriate access controls.
+
+### 4. Render
+
+Create a Render Blueprint from this repository and select `render.yaml`. It defines the Docker web service, `/ping` health check, and a persistent disk mounted at `/opt/alist/data`. The Blueprint uses Render's `PORT` value (the app binds to it automatically) and a paid plan because persistent disks are not available on free instances. Keep the disk attached: ephemeral instances without it will lose the database and signing key on replacement. Configure `ALIST_SITE_URL` for the public HTTPS URL if absolute links are needed; enable `ALIST_TRUST_PROXY` only when requests arrive through a proxy you control. The source and Compose deployment remain available independently of Render.
 
 ---
 

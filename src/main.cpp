@@ -42,8 +42,8 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (subcmd == "version" || subcmd == "-v" || subcmd == "--version") {
-        std::printf("%s %s\nEngine: %s\nWeb UI: %s\n",
-                    alist::kAppName, alist::kVersion, alist::kEngine, alist::kWebVersion);
+        std::printf("%s %s\nAuthor: %s (%s)\nEngine: %s\nWeb UI: %s\n",
+                    alist::kAppName, alist::kVersion, alist::kAuthor, alist::kAuthorUrl, alist::kEngine, alist::kWebVersion);
         return 0;
     }
 
@@ -134,6 +134,8 @@ int main(int argc, char** argv) {
     alist::ApiRouter router(cfg, db, vfs, tasks);
 
     alist::HttpServer server(cfg.address, cfg.http_port, cfg.worker_threads, cfg.max_connections);
+    router.set_server(&server);
+    server.set_trust_proxy(cfg.trust_proxy);
     server.set_download_limiter(&router.download_limiter());
     server.set_stream_predicate([&router](const alist::HttpRequest& r) {
         return router.should_stream_request_body(r);

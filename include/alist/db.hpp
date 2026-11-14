@@ -1,13 +1,16 @@
 #pragma once
 
+#include "alist/cache.hpp"
 #include "alist/models.hpp"
 
 #include <cstdint>
 #include <map>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 struct sqlite3;
@@ -33,21 +36,21 @@ public:
     bool init(const std::string& db_path, const std::string& master_secret, std::string* initial_admin_pwd_out = nullptr);
     void close();
 
-    // Settings
+    // Settings (O(1) RAM read cache, write-through to SQLite)
     std::string get_setting(std::string_view key, std::string_view def = "");
     int64_t get_setting_int(std::string_view key, int64_t def = 0);
     bool get_setting_bool(std::string_view key, bool def = false);
     bool set_setting(std::string_view key, std::string_view value, std::string_view group = "site", bool is_public = false);
     std::map<std::string, std::string> list_settings(bool public_only = false);
 
-    // Roles
+    // Roles (O(1) RAM read cache)
     std::vector<RoleRecord> list_roles();
     std::optional<RoleRecord> get_role(int64_t id);
     int64_t create_role(const RoleRecord& role);
     bool update_role(const RoleRecord& role);
     bool delete_role(int64_t id);
 
-    // Users
+    // Users (O(1) RAM read cache, pre-decrypted OTP secret in memory, AES-256-GCM on disk)
     std::vector<UserRecord> list_users();
     std::optional<UserRecord> get_user_by_id(int64_t id);
     std::optional<UserRecord> get_user_by_name(std::string_view username);
@@ -60,7 +63,7 @@ public:
     bool verify_and_advance_otp_step(int64_t user_id, int64_t matched_step);
     bool delete_user(int64_t id);
 
-    // JWT Revocation & Device Sessions (Atomic SQLite transaction -> zero TOCTOU race!)
+    // JWT Revocation & Write-Coalesced Device Sessions
     bool revoke_token_jti(std::string_view jti, int64_t exp_unix);
     bool is_token_jti_revoked(std::string_view jti);
     bool check_or_touch_session(int64_t user_id, std::string_view device_key,
@@ -77,7 +80,7 @@ public:
     bool update_storage_status(int64_t id, std::string_view status);
     bool delete_storage(int64_t id);
 
-    // Metas
+    // Metas (O(K) RAM read cache, pre-decrypted in memory)
     std::vector<MetaRecord> list_metas();
     std::optional<MetaRecord> get_meta(int64_t id);
     std::optional<MetaRecord> find_nearest_meta(std::string_view clean_path);
@@ -105,13 +108,40 @@ public:
         int page,
         int per_page);
 
+    [[nodiscard]] int64_t db_file_size_bytes() const;
+
 private:
+    struct SettingEntry {
+        std::string value;
+        bool is_public = false;
+    };
+
+    // Lock hierarchy invariant: mu_ ALWAYS precedes cache_mu_ (never acquire mu_ while holding cache_mu_).
     sqlite3* db_ = nullptr;
+    std::string db_path_;
     std::string master_secret_;
     std::recursive_mutex mu_;
 
+    mutable std::shared_mutex cache_mu_;
+    std::unordered_map<std::string, SettingEntry, TransparentStringHash, std::equal_to<>> settings_cache_;
+    std::vector<RoleRecord> roles_cache_;
+    std::unordered_map<int64_t, size_t> role_idx_by_id_;
+    std::vector<UserRecord> users_cache_;
+    std::unordered_map<int64_t, size_t> user_idx_by_id_;
+    std::unordered_map<std::string, size_t, TransparentStringHash, std::equal_to<>> user_idx_by_name_;
+    std::vector<MetaRecord> metas_cache_;
+    std::unordered_map<std::string, int64_t, TransparentStringHash, std::equal_to<>> revoked_jti_cache_;
+    std::unordered_map<std::string, SessionRecord, TransparentStringHash, std::equal_to<>> session_cache_;
+
     bool exec_sql(const char* sql);
     void seed_defaults(std::string* initial_admin_pwd_out);
+
+    // Must be called while holding mu_
+    void reload_settings_cache_locked();
+    void reload_roles_cache_locked();
+    void reload_users_cache_locked();
+    void reload_metas_cache_locked();
+    void reload_auth_caches_locked();
 };
 
 } // namespace alist

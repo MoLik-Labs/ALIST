@@ -29,6 +29,7 @@ struct AppConfig {
 
     bool allow_private_net_outbound = false; // SSRF guard default: block private/IMDS IPs!
     bool tls_insecure_skip_verify   = false;
+    bool trust_proxy                = false; // Only trust X-Forwarded-For when behind trusted reverse proxy
 
     std::vector<std::string> cors_allow_origins = {"*"};
     std::vector<std::string> cors_allow_methods = {
@@ -38,7 +39,7 @@ struct AppConfig {
     std::vector<std::string> cors_allow_headers = {
         "Origin", "Content-Length", "Content-Type", "Authorization", "Password",
         "File-Path", "As-Task", "Overwrite", "Range", "If-None-Match", "If-Modified-Since",
-        "Depth", "Destination", "Lock-Token", "Timeout", "If", "Client-Id", "X-Share-Token"
+        "Depth", "Destination", "Lock-Token", "Timeout", "If", "Client-Id", "X-Share-Token", "X-OTP-Code"
     };
 
     bool load_or_create(const std::string& data_dir_override);

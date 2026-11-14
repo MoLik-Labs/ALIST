@@ -106,14 +106,32 @@ public:
     HttpServer(const HttpServer&) = delete;
     HttpServer& operator=(const HttpServer&) = delete;
 
+    struct Stats {
+        uint64_t total_requests = 0;
+        uint64_t bytes_sent = 0;
+        uint64_t bytes_received = 0;
+        int active_connections = 0;
+        int64_t started_at_unix = 0;
+    };
+
     void set_handler(HttpHandler handler) { handler_ = std::move(handler); }
     void set_stream_predicate(StreamPredicate pred) { stream_pred_ = std::move(pred); }
     void set_download_limiter(TokenBucket* limiter) { download_limiter_ = limiter; }
+    void set_trust_proxy(bool trust) noexcept { trust_proxy_ = trust; }
 
     bool start();
     void stop();
     [[nodiscard]] int bound_port() const noexcept { return bound_port_; }
     [[nodiscard]] bool is_running() const noexcept { return running_.load(std::memory_order_relaxed); }
+    [[nodiscard]] Stats stats() const noexcept {
+        return Stats{
+            total_requests_.load(std::memory_order_relaxed),
+            bytes_sent_.load(std::memory_order_relaxed),
+            bytes_received_.load(std::memory_order_relaxed),
+            active_conns_.load(std::memory_order_relaxed),
+            started_at_unix_.load(std::memory_order_relaxed),
+        };
+    }
 
 private:
     void accept_loop();
@@ -125,6 +143,7 @@ private:
     int bound_port_ = 0;
     int num_workers_ = 8;
     int max_connections_ = 4096;
+    bool trust_proxy_ = false;
 
     int listen_fd_ = -1;
     int epoll_fd_  = -1;
@@ -132,6 +151,10 @@ private:
 
     std::atomic<bool> running_{false};
     std::atomic<int> active_conns_{0};
+    std::atomic<uint64_t> total_requests_{0};
+    std::atomic<uint64_t> bytes_sent_{0};
+    std::atomic<uint64_t> bytes_received_{0};
+    std::atomic<int64_t> started_at_unix_{0};
     std::thread accept_thread_;
     std::vector<std::thread> workers_;
 

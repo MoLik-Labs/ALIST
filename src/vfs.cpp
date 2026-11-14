@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <fcntl.h>
 #include <set>
+#include <unordered_set>
 #include <unistd.h>
 
 namespace alist {
@@ -30,19 +31,22 @@ bool is_balance_variant_of(std::string_view candidate_mount, std::string_view pr
 }
 
 void sort_entries(std::vector<FileObj>& entries, std::string_view order_by, std::string_view order_dir, std::string_view extract_folder) {
-    bool desc = iequals_ascii(order_dir, "DESC");
+    const bool desc = iequals_ascii(order_dir, "DESC");
     int folder_mode = 1; // 1 = front (default), 2 = back, 0 = mixed
     if (iequals_ascii(extract_folder, "back")) folder_mode = 2;
     else if (iequals_ascii(extract_folder, "none")) folder_mode = 0;
+    enum class SortKey { Name, Size, Modified };
+    const SortKey sort_key = iequals_ascii(order_by, "size") ? SortKey::Size :
+                             iequals_ascii(order_by, "modified") ? SortKey::Modified : SortKey::Name;
 
-    std::sort(entries.begin(), entries.end(), [&](const FileObj& a, const FileObj& b) {
+    std::sort(entries.begin(), entries.end(), [desc, folder_mode, sort_key](const FileObj& a, const FileObj& b) {
         if (folder_mode != 0 && a.is_dir != b.is_dir) {
             return (folder_mode == 1) ? a.is_dir : !a.is_dir;
         }
         int cmp = 0;
-        if (iequals_ascii(order_by, "size")) {
+        if (sort_key == SortKey::Size) {
             cmp = (a.size < b.size) ? -1 : (a.size > b.size ? 1 : 0);
-        } else if (iequals_ascii(order_by, "modified")) {
+        } else if (sort_key == SortKey::Modified) {
             cmp = (a.modified < b.modified) ? -1 : (a.modified > b.modified ? 1 : 0);
         }
         if (cmp == 0) {
@@ -373,7 +377,7 @@ VfsListResult VfsEngine::list_dir(const UserRecord* user, std::string_view globa
         res.provider = mm->mounted->record.driver;
         const auto& srec = mm->mounted->record;
         auto drv_info = mm->mounted->driver->info();
-        std::string cache_key = srec.mount_path + "\x00" + mm->subpath;
+        const std::string& cache_key = clean;
 
         ObjListSnapshot snap;
         if (!refresh && !drv_info.no_cache && srec.cache_expiration > 0) {
@@ -382,7 +386,7 @@ VfsListResult VfsEngine::list_dir(const UserRecord* user, std::string_view globa
             }
         }
         if (!snap) {
-            auto [loaded_snap, err] = list_singleflight_.execute(cache_key, [&]() -> std::pair<ObjListSnapshot, std::string> {
+            auto load_fn = [&]() -> std::pair<ObjListSnapshot, std::string> {
                 std::vector<FileObj> raw;
                 std::string derr;
                 if (!mm->mounted->driver->list(mm->subpath, raw, derr)) {
@@ -396,7 +400,10 @@ VfsListResult VfsEngine::list_dir(const UserRecord* user, std::string_view globa
                     list_cache_.put(cache_key, ptr, std::chrono::seconds(srec.cache_expiration * 60));
                 }
                 return {ptr, ""};
-            });
+            };
+            auto [loaded_snap, err] = drv_info.no_cache
+                                          ? load_fn()
+                                          : list_singleflight_.execute(cache_key, load_fn);
             if (!loaded_snap) {
                 res.http_status = 500;
                 res.error = err.empty() ? "Failed to list directory" : err;
@@ -410,20 +417,21 @@ VfsListResult VfsEngine::list_dir(const UserRecord* user, std::string_view globa
         combined.assign(snap->begin(), snap->end());
     }
 
-    // Synthesize virtual child mount folders (e.g. "/" -> mounted storages)
+    // Synthesize virtual child mount folders (e.g. "/" -> mounted storages).
+    // A name set avoids rescanning every storage entry for each mounted child.
     auto vchildren = list_virtual_children(clean);
+    std::unordered_set<std::string> existing_names;
+    existing_names.reserve(combined.size() + vchildren.size());
+    for (const auto& e : combined) existing_names.insert(e.name);
     for (const auto& vname : vchildren) {
-        bool exists = false;
-        for (const auto& e : combined) {
-            if (e.name == vname) { exists = true; break; }
-        }
-        if (!exists) {
+        if (!existing_names.contains(vname)) {
             FileObj vf;
             vf.name = vname;
             vf.is_dir = true;
             vf.size = 0;
             vf.modified = unix_now();
             vf.type = 1;
+            existing_names.insert(vname);
             combined.push_back(std::move(vf));
         }
     }
@@ -441,26 +449,33 @@ VfsListResult VfsEngine::list_dir(const UserRecord* user, std::string_view globa
                       meta.has_value() && !meta->hide.empty() &&
                       (meta->path == clean || (is_subpath(meta->path, clean) && meta->h_sub));
 
+    std::vector<std::string> visible_scope_paths;
+    if (user && !user->is_admin() && !user->role_ids.empty()) {
+        for (int64_t rid : user->role_ids) {
+            if (auto role = db_.get_role(rid)) {
+                for (const auto& scope : role->scopes) visible_scope_paths.push_back(scope.path);
+            }
+        }
+    }
+
     res.entries.reserve(combined.size());
     for (auto& item : combined) {
         auto child_vpath = join_vpath(clean, item.name).value_or(clean + "/" + item.name);
         if (check_hide && matches_any_hide_pattern(meta->hide, item.name)) {
             continue;
         }
-        if (user && !user->is_admin() && !user->role_ids.empty()) {
+        if (!visible_scope_paths.empty()) {
             bool child_visible = false;
-            for (int64_t rid : user->role_ids) {
-                if (auto r = db_.get_role(rid)) {
-                    for (const auto& sc : r->scopes) {
-                        if (is_subpath(sc.path, child_vpath) || is_subpath(child_vpath, sc.path)) {
-                            child_visible = true;
-                            break;
-                        }
-                    }
+            for (const auto& scope_path : visible_scope_paths) {
+                if (is_subpath(scope_path, child_vpath) || is_subpath(child_vpath, scope_path)) {
+                    child_visible = true;
+                    break;
                 }
-                if (child_visible) break;
             }
             if (!child_visible) continue;
+        } else if (user && !user->is_admin() && !user->role_ids.empty()) {
+            // A user assigned only to missing/empty roles has no scoped visibility.
+            continue;
         }
         if (!item.is_dir && (need_sign || should_sign_path(child_vpath))) {
             item.sign = sign_vpath(child_vpath);

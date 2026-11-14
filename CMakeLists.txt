@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(alist_core VERSION 4.0.0 LANGUAGES CXX)
+project(alist_nggkhaiz VERSION 4.1.0 DESCRIPTION "AList @nggkhaiz Native C++20 Multi-Storage Engine" LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

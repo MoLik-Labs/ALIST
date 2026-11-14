@@ -8,6 +8,7 @@
 #include "c_libs.hpp"
 
 #include <algorithm>
+#include <filesystem>
 #include <sys/stat.h>
 
 namespace alist {
@@ -88,6 +89,85 @@ std::vector<RoleScope> parse_scopes(std::string_view s) {
     return out;
 }
 
+UserRecord row_to_user(const Stmt& st) {
+    UserRecord u;
+    u.id                = st.col_i64(0);
+    u.username          = st.col_str(1);
+    u.password_hash     = st.col_str(2);
+    u.pwd_ts            = st.col_i64(3);
+    u.base_path         = clean_vpath(st.col_str(4)).value_or("/");
+    u.identity          = st.col_int(5);
+    u.role_ids          = parse_role_ids(st.col_str(6));
+    u.legacy_permission = st.col_int(7);
+    u.disabled          = st.col_int(8) != 0;
+    u.otp_secret        = st.col_str(9);
+    u.last_otp_step     = st.col_i64(10);
+    return u;
+}
+
+StorageRecord row_to_storage(const Stmt& st, std::string_view master_secret) {
+    StorageRecord s;
+    s.id               = st.col_i64(0);
+    s.mount_path       = clean_vpath(st.col_str(1)).value_or("/");
+    s.order_idx        = st.col_int(2);
+    s.driver           = st.col_str(3);
+    s.cache_expiration = st.col_int(4);
+    s.status           = st.col_str(5);
+    s.addition         = vault_decrypt(master_secret, st.col_str(6));
+    s.remark           = st.col_str(7);
+    s.modified         = st.col_i64(8);
+    s.disabled         = st.col_int(9) != 0;
+    s.enable_sign      = st.col_int(10) != 0;
+    s.order_by         = st.col_str(11);
+    s.order_direction  = st.col_str(12);
+    s.extract_folder   = st.col_str(13);
+    s.web_proxy        = st.col_int(14) != 0;
+    s.webdav_policy    = st.col_str(15);
+    s.down_proxy_url   = st.col_str(16);
+    return s;
+}
+
+MetaRecord row_to_meta(const Stmt& st, std::string_view master_secret) {
+    MetaRecord m;
+    m.id         = st.col_i64(0);
+    m.path       = clean_vpath(st.col_str(1)).value_or("/");
+    m.password   = vault_decrypt(master_secret, st.col_str(2));
+    m.p_sub      = st.col_int(3) != 0;
+    m.write      = st.col_int(4) != 0;
+    m.w_sub      = st.col_int(5) != 0;
+    m.hide       = st.col_str(6);
+    m.h_sub      = st.col_int(7) != 0;
+    m.readme     = st.col_str(8);
+    m.r_sub      = st.col_int(9) != 0;
+    m.header     = st.col_str(10);
+    m.header_sub = st.col_int(11) != 0;
+    return m;
+}
+
+ShareRecord row_to_share(const Stmt& st) {
+    ShareRecord s;
+    s.id            = st.col_i64(0);
+    s.share_id      = st.col_str(1);
+    s.creator_id    = st.col_i64(2);
+    s.creator_name  = st.col_str(3);
+    s.path          = clean_vpath(st.col_str(4)).value_or("/");
+    s.is_dir        = st.col_int(5) != 0;
+    s.password_hash = st.col_str(6);
+    s.has_password  = !s.password_hash.empty();
+    s.expires_at    = st.col_i64(7);
+    s.max_downloads = st.col_i64(8);
+    s.downloads     = st.col_i64(9);
+    s.views         = st.col_i64(10);
+    s.disabled      = st.col_int(11) != 0;
+    s.created_at    = st.col_i64(12);
+    s.updated_at    = st.col_i64(13);
+    return s;
+}
+
+std::string session_map_key(int64_t uid, std::string_view dev_key) {
+    return std::to_string(uid) + ":" + std::string(dev_key);
+}
+
 } // namespace
 
 Database::~Database() { close(); }
@@ -98,6 +178,29 @@ void Database::close() {
         sqlite3_close_v2(db_);
         db_ = nullptr;
     }
+    std::unique_lock<std::shared_mutex> wlk(cache_mu_);
+    settings_cache_.clear();
+    roles_cache_.clear();
+    role_idx_by_id_.clear();
+    users_cache_.clear();
+    user_idx_by_id_.clear();
+    user_idx_by_name_.clear();
+    metas_cache_.clear();
+    revoked_jti_cache_.clear();
+    session_cache_.clear();
+}
+
+int64_t Database::db_file_size_bytes() const {
+    if (db_path_.empty() || db_path_ == ":memory:") return 0;
+    std::error_code ec;
+    int64_t total = 0;
+    if (std::filesystem::exists(db_path_, ec)) {
+        total += static_cast<int64_t>(std::filesystem::file_size(db_path_, ec));
+    }
+    if (std::filesystem::exists(db_path_ + "-wal", ec)) {
+        total += static_cast<int64_t>(std::filesystem::file_size(db_path_ + "-wal", ec));
+    }
+    return total;
 }
 
 bool Database::exec_sql(const char* sql) {
@@ -111,9 +214,99 @@ bool Database::exec_sql(const char* sql) {
     return true;
 }
 
+void Database::reload_settings_cache_locked() {
+    std::unordered_map<std::string, SettingEntry, TransparentStringHash, std::equal_to<>> next;
+    Stmt st(db_, "SELECT key, value, is_public FROM x_settings;");
+    while (st.step() == SQLITE_ROW) {
+        next.emplace(st.col_str(0), SettingEntry{st.col_str(1), st.col_int(2) != 0});
+    }
+    std::unique_lock<std::shared_mutex> wlk(cache_mu_);
+    settings_cache_ = std::move(next);
+}
+
+void Database::reload_roles_cache_locked() {
+    std::vector<RoleRecord> next;
+    std::unordered_map<int64_t, size_t> idx;
+    Stmt st(db_, "SELECT id, name, description, default_inheritable, scopes_json FROM x_roles ORDER BY id ASC;");
+    while (st.step() == SQLITE_ROW) {
+        RoleRecord r;
+        r.id = st.col_i64(0);
+        r.name = st.col_str(1);
+        r.description = st.col_str(2);
+        r.default_inheritable = st.col_int(3) != 0;
+        r.scopes = parse_scopes(st.col_str(4));
+        idx[r.id] = next.size();
+        next.push_back(std::move(r));
+    }
+    std::unique_lock<std::shared_mutex> wlk(cache_mu_);
+    roles_cache_ = std::move(next);
+    role_idx_by_id_ = std::move(idx);
+}
+
+void Database::reload_users_cache_locked() {
+    std::vector<UserRecord> next;
+    std::unordered_map<int64_t, size_t> by_id;
+    std::unordered_map<std::string, size_t, TransparentStringHash, std::equal_to<>> by_name;
+    Stmt st(db_, "SELECT id, username, password_hash, pwd_ts, base_path, identity, role_ids_json, "
+                 "legacy_permission, disabled, otp_secret, last_otp_step FROM x_users ORDER BY id ASC;");
+    while (st.step() == SQLITE_ROW) {
+        auto u = row_to_user(st);
+        u.otp_secret = vault_decrypt(master_secret_, u.otp_secret);
+        size_t pos = next.size();
+        by_id[u.id] = pos;
+        by_name.emplace(u.username, pos);
+        next.push_back(std::move(u));
+    }
+    std::unique_lock<std::shared_mutex> wlk(cache_mu_);
+    users_cache_ = std::move(next);
+    user_idx_by_id_ = std::move(by_id);
+    user_idx_by_name_ = std::move(by_name);
+}
+
+void Database::reload_metas_cache_locked() {
+    std::vector<MetaRecord> next;
+    Stmt st(db_, "SELECT id, path, password, p_sub, write_allow, w_sub, hide, h_sub, readme, r_sub, header, header_sub "
+                 "FROM x_metas ORDER BY LENGTH(path) DESC;");
+    while (st.step() == SQLITE_ROW) {
+        next.push_back(row_to_meta(st, master_secret_));
+    }
+    std::unique_lock<std::shared_mutex> wlk(cache_mu_);
+    metas_cache_ = std::move(next);
+}
+
+void Database::reload_auth_caches_locked() {
+    int64_t now = unix_now();
+    std::unordered_map<std::string, int64_t, TransparentStringHash, std::equal_to<>> jtis;
+    {
+        Stmt st(db_, "SELECT jti, exp_unix FROM x_revoked_tokens WHERE exp_unix > ?1;");
+        st.bind_i64(1, now);
+        while (st.step() == SQLITE_ROW) {
+            jtis.emplace(st.col_str(0), st.col_i64(1));
+        }
+    }
+    std::unordered_map<std::string, SessionRecord, TransparentStringHash, std::equal_to<>> sess;
+    {
+        Stmt st(db_, "SELECT user_id, device_key, user_agent, ip, last_active, status FROM x_sessions;");
+        while (st.step() == SQLITE_ROW) {
+            SessionRecord s;
+            s.user_id     = st.col_i64(0);
+            s.device_key  = st.col_str(1);
+            s.user_agent  = st.col_str(2);
+            s.ip          = st.col_str(3);
+            s.last_active = st.col_i64(4);
+            s.status      = st.col_int(5);
+            sess.emplace(session_map_key(s.user_id, s.device_key), std::move(s));
+        }
+    }
+    std::unique_lock<std::shared_mutex> wlk(cache_mu_);
+    revoked_jti_cache_ = std::move(jtis);
+    session_cache_ = std::move(sess);
+}
+
 bool Database::init(const std::string& db_path, const std::string& master_secret, std::string* initial_admin_pwd_out) {
     std::lock_guard<std::recursive_mutex> lk(mu_);
     close();
+    db_path_ = db_path;
     master_secret_ = master_secret;
 
     int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX;
@@ -130,8 +323,8 @@ bool Database::init(const std::string& db_path, const std::string& master_secret
     exec_sql("PRAGMA synchronous = NORMAL;");
     exec_sql("PRAGMA foreign_keys = ON;");
     exec_sql("PRAGMA temp_store = MEMORY;");
-    exec_sql("PRAGMA cache_size = -8000;");
-    exec_sql("PRAGMA mmap_size = 67108864;");
+    exec_sql("PRAGMA cache_size = -16000;");
+    exec_sql("PRAGMA mmap_size = 134217728;");
 
     const char* schema_sql = R"SQL(
         CREATE TABLE IF NOT EXISTS x_settings (
@@ -235,6 +428,11 @@ bool Database::init(const std::string& db_path, const std::string& master_secret
 
     if (!exec_sql(schema_sql)) return false;
     seed_defaults(initial_admin_pwd_out);
+    reload_settings_cache_locked();
+    reload_roles_cache_locked();
+    reload_users_cache_locked();
+    reload_metas_cache_locked();
+    reload_auth_caches_locked();
     return true;
 }
 
@@ -249,7 +447,7 @@ void Database::seed_defaults(std::string* initial_admin_pwd_out) {
     };
 
     ensure_setting("version", kVersion, "site", true);
-    ensure_setting("site_title", "AList-Core", "site", true);
+    ensure_setting("site_title", "AList · @nggkhaiz", "site", true);
     ensure_setting("announcement", "", "site", true);
     ensure_setting("pagination_type", "all", "site", true);
     ensure_setting("default_page_size", "50", "site", true);
@@ -259,15 +457,17 @@ void Database::seed_defaults(std::string* initial_admin_pwd_out) {
     ensure_setting("search_index", "fts5", "index", true);
     ensure_setting("enable_search", "true", "index", true);
     ensure_setting("sign_all", "false", "global", false);
-    ensure_setting("link_expiration", "0", "global", false); // hours; 0 = permanent HMAC
-    ensure_setting("token", "alist-" + random_hex(24), "global", false);
-    ensure_setting("max_devices", "0", "session", false); // 0 = unlimited
+    ensure_setting("link_expiration", "0", "global", false);
+    ensure_setting("token", "nggkhaiz-" + random_hex(24), "global", false);
+    ensure_setting("max_devices", "0", "session", false);
     ensure_setting("device_evict_policy", "evict_oldest", "session", false);
     ensure_setting("device_session_ttl", "86400", "session", false);
     ensure_setting("forward_direct_link_params", "false", "global", false);
 
-    // Seed built-in Roles: 1 = admin_role, 2 = guest_role
-    if (list_roles().empty()) {
+    // Seed built-in Roles & Users if not present (query directly before cache reload)
+    Stmt rc(db_, "SELECT COUNT(*) FROM x_roles;");
+    int64_t rcount = (rc.step() == SQLITE_ROW) ? rc.col_i64(0) : 0;
+    if (rcount == 0) {
         RoleRecord admin_role;
         admin_role.name = "admin";
         admin_role.description = "Full administrative access across all paths";
@@ -280,8 +480,8 @@ void Database::seed_defaults(std::string* initial_admin_pwd_out) {
         guest_role.scopes = {{.path = "/", .permission = kDefaultGuestPerms}};
         int64_t guest_rid = create_role(guest_role);
 
-        // Seed Admin & Guest Users if not present
-        if (!get_user_by_name("admin")) {
+        Stmt uc(db_, "SELECT COUNT(*) FROM x_users WHERE username = 'admin';");
+        if (uc.step() == SQLITE_ROW && uc.col_i64(0) == 0) {
             std::string init_pwd = random_base64url(12);
             if (const char* env_pw = std::getenv("ALIST_ADMIN_PASSWORD"); env_pw && *env_pw) {
                 init_pwd = env_pw;
@@ -300,7 +500,8 @@ void Database::seed_defaults(std::string* initial_admin_pwd_out) {
             create_user(admin_u);
         }
 
-        if (!get_user_by_name("guest")) {
+        Stmt gc(db_, "SELECT COUNT(*) FROM x_users WHERE username = 'guest';");
+        if (gc.step() == SQLITE_ROW && gc.col_i64(0) == 0) {
             UserRecord guest_u;
             guest_u.username = "guest";
             guest_u.password_hash = "";
@@ -309,27 +510,30 @@ void Database::seed_defaults(std::string* initial_admin_pwd_out) {
             guest_u.identity = kUserGuest;
             guest_u.role_ids = {guest_rid};
             guest_u.legacy_permission = kDefaultGuestPerms;
-            guest_u.disabled = true; // Secure-by-default: guest disabled until admin enables or logs in!
+            guest_u.disabled = true;
             create_user(guest_u);
         }
     }
 }
 
 std::string Database::get_setting(std::string_view key, std::string_view def) {
-    std::lock_guard<std::recursive_mutex> lk(mu_);
-    Stmt st(db_, "SELECT value FROM x_settings WHERE key = ?1;");
-    st.bind_str(1, key);
-    if (st.step() == SQLITE_ROW) return st.col_str(0);
-    return std::string(def);
+    std::shared_lock<std::shared_mutex> rlk(cache_mu_);
+    auto it = settings_cache_.find(key);
+    return (it != settings_cache_.end()) ? it->second.value : std::string(def);
 }
 
 int64_t Database::get_setting_int(std::string_view key, int64_t def) {
-    auto s = get_setting(key, "");
-    return parse_i64(s).value_or(def);
+    std::shared_lock<std::shared_mutex> rlk(cache_mu_);
+    auto it = settings_cache_.find(key);
+    if (it == settings_cache_.end()) return def;
+    return parse_i64(it->second.value).value_or(def);
 }
 
 bool Database::get_setting_bool(std::string_view key, bool def) {
-    auto s = to_lower_ascii(get_setting(key, ""));
+    std::shared_lock<std::shared_mutex> rlk(cache_mu_);
+    auto it = settings_cache_.find(key);
+    if (it == settings_cache_.end()) return def;
+    auto s = to_lower_ascii(it->second.value);
     if (s == "true" || s == "1" || s == "yes") return true;
     if (s == "false" || s == "0" || s == "no") return false;
     return def;
@@ -343,48 +547,30 @@ bool Database::set_setting(std::string_view key, std::string_view value, std::st
     st.bind_str(2, value);
     st.bind_str(3, group);
     st.bind_int(4, is_public ? 1 : 0);
-    return st.step() == SQLITE_DONE;
+    bool ok = (st.step() == SQLITE_DONE);
+    if (ok) reload_settings_cache_locked();
+    return ok;
 }
 
 std::map<std::string, std::string> Database::list_settings(bool public_only) {
-    std::lock_guard<std::recursive_mutex> lk(mu_);
+    std::shared_lock<std::shared_mutex> rlk(cache_mu_);
     std::map<std::string, std::string> out;
-    Stmt st(db_, public_only ? "SELECT key, value FROM x_settings WHERE is_public = 1;"
-                             : "SELECT key, value FROM x_settings;");
-    while (st.step() == SQLITE_ROW) {
-        out.emplace(st.col_str(0), st.col_str(1));
+    for (const auto& [k, e] : settings_cache_) {
+        if (!public_only || e.is_public) out.emplace(k, e.value);
     }
     return out;
 }
 
 std::vector<RoleRecord> Database::list_roles() {
-    std::lock_guard<std::recursive_mutex> lk(mu_);
-    std::vector<RoleRecord> out;
-    Stmt st(db_, "SELECT id, name, description, default_inheritable, scopes_json FROM x_roles ORDER BY id ASC;");
-    while (st.step() == SQLITE_ROW) {
-        RoleRecord r;
-        r.id = st.col_i64(0);
-        r.name = st.col_str(1);
-        r.description = st.col_str(2);
-        r.default_inheritable = st.col_int(3) != 0;
-        r.scopes = parse_scopes(st.col_str(4));
-        out.push_back(std::move(r));
-    }
-    return out;
+    std::shared_lock<std::shared_mutex> rlk(cache_mu_);
+    return roles_cache_;
 }
 
 std::optional<RoleRecord> Database::get_role(int64_t id) {
-    std::lock_guard<std::recursive_mutex> lk(mu_);
-    Stmt st(db_, "SELECT id, name, description, default_inheritable, scopes_json FROM x_roles WHERE id = ?1;");
-    st.bind_i64(1, id);
-    if (st.step() != SQLITE_ROW) return std::nullopt;
-    RoleRecord r;
-    r.id = st.col_i64(0);
-    r.name = st.col_str(1);
-    r.description = st.col_str(2);
-    r.default_inheritable = st.col_int(3) != 0;
-    r.scopes = parse_scopes(st.col_str(4));
-    return r;
+    std::shared_lock<std::shared_mutex> rlk(cache_mu_);
+    auto it = role_idx_by_id_.find(id);
+    if (it == role_idx_by_id_.end()) return std::nullopt;
+    return roles_cache_[it->second];
 }
 
 int64_t Database::create_role(const RoleRecord& role) {
@@ -395,7 +581,9 @@ int64_t Database::create_role(const RoleRecord& role) {
     st.bind_int(3, role.default_inheritable ? 1 : 0);
     st.bind_str(4, serialize_scopes(role.scopes));
     if (st.step() != SQLITE_DONE) return 0;
-    return sqlite3_last_insert_rowid(db_);
+    int64_t id = sqlite3_last_insert_rowid(db_);
+    reload_roles_cache_locked();
+    return id;
 }
 
 bool Database::update_role(const RoleRecord& role) {
@@ -406,88 +594,54 @@ bool Database::update_role(const RoleRecord& role) {
     st.bind_int(3, role.default_inheritable ? 1 : 0);
     st.bind_str(4, serialize_scopes(role.scopes));
     st.bind_i64(5, role.id);
-    return st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0;
+    bool ok = (st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0);
+    if (ok) reload_roles_cache_locked();
+    return ok;
 }
 
 bool Database::delete_role(int64_t id) {
-    if (id <= 2) return false; // Protect built-in admin & guest roles
+    if (id <= 2) return false;
     std::lock_guard<std::recursive_mutex> lk(mu_);
     Stmt st(db_, "DELETE FROM x_roles WHERE id = ?1;");
     st.bind_i64(1, id);
-    return st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0;
+    bool ok = (st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0);
+    if (ok) reload_roles_cache_locked();
+    return ok;
 }
-
-namespace {
-UserRecord row_to_user(const Stmt& st) {
-    UserRecord u;
-    u.id                = st.col_i64(0);
-    u.username          = st.col_str(1);
-    u.password_hash     = st.col_str(2);
-    u.pwd_ts            = st.col_i64(3);
-    u.base_path         = clean_vpath(st.col_str(4)).value_or("/");
-    u.identity          = st.col_int(5);
-    u.role_ids          = parse_role_ids(st.col_str(6));
-    u.legacy_permission = st.col_int(7);
-    u.disabled          = st.col_int(8) != 0;
-    u.otp_secret        = st.col_str(9);
-    u.last_otp_step     = st.col_i64(10);
-    return u;
-}
-} // namespace
 
 std::vector<UserRecord> Database::list_users() {
-    std::lock_guard<std::recursive_mutex> lk(mu_);
-    std::vector<UserRecord> out;
-    Stmt st(db_, "SELECT id, username, password_hash, pwd_ts, base_path, identity, role_ids_json, "
-                 "legacy_permission, disabled, otp_secret, last_otp_step FROM x_users ORDER BY id ASC;");
-    while (st.step() == SQLITE_ROW) {
-        auto u = row_to_user(st);
-        u.otp_secret = vault_decrypt(master_secret_, u.otp_secret);
-        out.push_back(std::move(u));
-    }
-    return out;
+    std::shared_lock<std::shared_mutex> rlk(cache_mu_);
+    return users_cache_;
 }
 
 std::optional<UserRecord> Database::get_user_by_id(int64_t id) {
-    std::lock_guard<std::recursive_mutex> lk(mu_);
-    Stmt st(db_, "SELECT id, username, password_hash, pwd_ts, base_path, identity, role_ids_json, "
-                 "legacy_permission, disabled, otp_secret, last_otp_step FROM x_users WHERE id = ?1;");
-    st.bind_i64(1, id);
-    if (st.step() != SQLITE_ROW) return std::nullopt;
-    auto u = row_to_user(st);
-    u.otp_secret = vault_decrypt(master_secret_, u.otp_secret);
-    return u;
+    std::shared_lock<std::shared_mutex> rlk(cache_mu_);
+    auto it = user_idx_by_id_.find(id);
+    if (it == user_idx_by_id_.end()) return std::nullopt;
+    return users_cache_[it->second];
 }
 
 std::optional<UserRecord> Database::get_user_by_name(std::string_view username) {
-    std::lock_guard<std::recursive_mutex> lk(mu_);
-    Stmt st(db_, "SELECT id, username, password_hash, pwd_ts, base_path, identity, role_ids_json, "
-                 "legacy_permission, disabled, otp_secret, last_otp_step FROM x_users WHERE username = ?1;");
-    st.bind_str(1, username);
-    if (st.step() != SQLITE_ROW) return std::nullopt;
-    auto u = row_to_user(st);
-    u.otp_secret = vault_decrypt(master_secret_, u.otp_secret);
-    return u;
+    std::shared_lock<std::shared_mutex> rlk(cache_mu_);
+    auto it = user_idx_by_name_.find(username);
+    if (it == user_idx_by_name_.end()) return std::nullopt;
+    return users_cache_[it->second];
 }
 
 std::optional<UserRecord> Database::get_admin_user() {
-    std::lock_guard<std::recursive_mutex> lk(mu_);
-    Stmt st(db_, "SELECT id, username, password_hash, pwd_ts, base_path, identity, role_ids_json, "
-                 "legacy_permission, disabled, otp_secret, last_otp_step FROM x_users WHERE identity = 2 ORDER BY id ASC LIMIT 1;");
-    if (st.step() != SQLITE_ROW) return std::nullopt;
-    auto u = row_to_user(st);
-    u.otp_secret = vault_decrypt(master_secret_, u.otp_secret);
-    return u;
+    std::shared_lock<std::shared_mutex> rlk(cache_mu_);
+    for (const auto& u : users_cache_) {
+        if (u.identity == kUserAdmin) return u;
+    }
+    return std::nullopt;
 }
 
 std::optional<UserRecord> Database::get_guest_user() {
-    std::lock_guard<std::recursive_mutex> lk(mu_);
-    Stmt st(db_, "SELECT id, username, password_hash, pwd_ts, base_path, identity, role_ids_json, "
-                 "legacy_permission, disabled, otp_secret, last_otp_step FROM x_users WHERE identity = 1 ORDER BY id ASC LIMIT 1;");
-    if (st.step() != SQLITE_ROW) return std::nullopt;
-    auto u = row_to_user(st);
-    u.otp_secret = vault_decrypt(master_secret_, u.otp_secret);
-    return u;
+    std::shared_lock<std::shared_mutex> rlk(cache_mu_);
+    for (const auto& u : users_cache_) {
+        if (u.identity == kUserGuest) return u;
+    }
+    return std::nullopt;
 }
 
 int64_t Database::create_user(const UserRecord& user) {
@@ -505,7 +659,9 @@ int64_t Database::create_user(const UserRecord& user) {
     st.bind_str(9, user.otp_secret.empty() ? "" : vault_encrypt(master_secret_, user.otp_secret));
     st.bind_i64(10, user.last_otp_step);
     if (st.step() != SQLITE_DONE) return 0;
-    return sqlite3_last_insert_rowid(db_);
+    int64_t id = sqlite3_last_insert_rowid(db_);
+    reload_users_cache_locked();
+    return id;
 }
 
 bool Database::update_user(const UserRecord& user) {
@@ -522,14 +678,15 @@ bool Database::update_user(const UserRecord& user) {
     st.bind_int(8, user.disabled ? 1 : 0);
     st.bind_str(9, user.otp_secret.empty() ? "" : vault_encrypt(master_secret_, user.otp_secret));
     st.bind_i64(10, user.id);
-    return st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0;
+    bool ok = (st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0);
+    if (ok) reload_users_cache_locked();
+    return ok;
 }
 
 bool Database::update_user_password(int64_t user_id, std::string_view new_plain_password) {
-    std::lock_guard<std::recursive_mutex> lk(mu_);
     std::string h = hash_password_pbkdf2(new_plain_password);
+    std::lock_guard<std::recursive_mutex> lk(mu_);
     int64_t ts = unix_now();
-    // Bump pwd_ts deterministically even if changed twice in the same second!
     Stmt get_ts(db_, "SELECT pwd_ts FROM x_users WHERE id = ?1;");
     get_ts.bind_i64(1, user_id);
     if (get_ts.step() == SQLITE_ROW) {
@@ -540,7 +697,9 @@ bool Database::update_user_password(int64_t user_id, std::string_view new_plain_
     st.bind_str(1, h);
     st.bind_i64(2, ts);
     st.bind_i64(3, user_id);
-    return st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0;
+    bool ok = (st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0);
+    if (ok) reload_users_cache_locked();
+    return ok;
 }
 
 bool Database::update_user_otp(int64_t user_id, std::string_view otp_secret, int64_t last_step) {
@@ -549,16 +708,23 @@ bool Database::update_user_otp(int64_t user_id, std::string_view otp_secret, int
     st.bind_str(1, otp_secret.empty() ? "" : vault_encrypt(master_secret_, otp_secret));
     st.bind_i64(2, last_step);
     st.bind_i64(3, user_id);
-    return st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0;
+    bool ok = (st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0);
+    if (ok) reload_users_cache_locked();
+    return ok;
 }
 
 bool Database::verify_and_advance_otp_step(int64_t user_id, int64_t matched_step) {
     std::lock_guard<std::recursive_mutex> lk(mu_);
-    // Atomic replay protection: only succeeds if matched_step > last_otp_step!
     Stmt st(db_, "UPDATE x_users SET last_otp_step = ?1 WHERE id = ?2 AND last_otp_step < ?1;");
     st.bind_i64(1, matched_step);
     st.bind_i64(2, user_id);
-    return st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0;
+    bool ok = (st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0);
+    if (ok) {
+        std::unique_lock<std::shared_mutex> wlk(cache_mu_);
+        auto it = user_idx_by_id_.find(user_id);
+        if (it != user_idx_by_id_.end()) users_cache_[it->second].last_otp_step = matched_step;
+    }
+    return ok;
 }
 
 bool Database::delete_user(int64_t id) {
@@ -570,36 +736,68 @@ bool Database::delete_user(int64_t id) {
     s1.step();
     Stmt st(db_, "DELETE FROM x_users WHERE id = ?1;");
     st.bind_i64(1, id);
-    return st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0;
+    bool ok = (st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0);
+    if (ok) {
+        reload_users_cache_locked();
+        reload_auth_caches_locked();
+    }
+    return ok;
 }
 
 bool Database::revoke_token_jti(std::string_view jti, int64_t exp_unix) {
     if (jti.empty()) return false;
     std::lock_guard<std::recursive_mutex> lk(mu_);
+    int64_t now = unix_now();
     Stmt cleanup(db_, "DELETE FROM x_revoked_tokens WHERE exp_unix <= ?1;");
-    cleanup.bind_i64(1, unix_now());
+    cleanup.bind_i64(1, now);
     cleanup.step();
 
     Stmt st(db_, "INSERT OR REPLACE INTO x_revoked_tokens(jti, exp_unix) VALUES(?1, ?2);");
     st.bind_str(1, jti);
     st.bind_i64(2, exp_unix);
-    return st.step() == SQLITE_DONE;
+    bool ok = (st.step() == SQLITE_DONE);
+    if (ok) {
+        std::unique_lock<std::shared_mutex> wlk(cache_mu_);
+        revoked_jti_cache_[std::string(jti)] = exp_unix;
+    }
+    return ok;
 }
 
 bool Database::is_token_jti_revoked(std::string_view jti) {
     if (jti.empty()) return false;
-    std::lock_guard<std::recursive_mutex> lk(mu_);
-    Stmt st(db_, "SELECT 1 FROM x_revoked_tokens WHERE jti = ?1 AND exp_unix > ?2;");
-    st.bind_str(1, jti);
-    st.bind_i64(2, unix_now());
-    return st.step() == SQLITE_ROW;
+    int64_t now = unix_now();
+    std::shared_lock<std::shared_mutex> rlk(cache_mu_);
+    auto it = revoked_jti_cache_.find(jti);
+    return it != revoked_jti_cache_.end() && it->second > now;
 }
 
 bool Database::check_or_touch_session(int64_t user_id, std::string_view device_key,
                                       std::string_view ua, std::string_view ip,
                                       bool is_login, std::string* err_out) {
-    std::lock_guard<std::recursive_mutex> lk(mu_);
     int64_t now = unix_now();
+    std::string map_k = session_map_key(user_id, device_key);
+
+    // Hot Read Fast Path: O(1) shared-lock check without hitting SQLite WAL on every API call!
+    if (!is_login) {
+        std::shared_lock<std::shared_mutex> rlk(cache_mu_);
+        int64_t ttl = 86400;
+        if (auto it_ttl = settings_cache_.find("device_session_ttl"); it_ttl != settings_cache_.end()) {
+            ttl = parse_i64(it_ttl->second.value).value_or(86400);
+        }
+        auto it = session_cache_.find(map_k);
+        if (it != session_cache_.end()) {
+            if (it->second.status == 1) {
+                if (err_out) *err_out = "Session has been evicted or logged out";
+                return false;
+            }
+            bool not_expired = (ttl <= 0) || (now - it->second.last_active < ttl);
+            if (not_expired && (now - it->second.last_active < 30)) {
+                return true; // Coalesce DB touches within 30s window!
+            }
+        }
+    }
+
+    std::lock_guard<std::recursive_mutex> lk(mu_);
     int64_t ttl = get_setting_int("device_session_ttl", 86400);
     if (ttl > 0) {
         Stmt del(db_, "DELETE FROM x_sessions WHERE last_active < ?1;");
@@ -614,6 +812,7 @@ bool Database::check_or_touch_session(int64_t user_id, std::string_view device_k
     int cur_status = exists ? sel.col_int(0) : -1;
 
     if (exists && cur_status == 1 && !is_login) {
+        reload_auth_caches_locked();
         if (err_out) *err_out = "Session has been evicted or logged out";
         return false;
     }
@@ -649,7 +848,9 @@ bool Database::check_or_touch_session(int64_t user_id, std::string_view device_k
     up.bind_str(3, ua.substr(0, 256));
     up.bind_str(4, ip.substr(0, 64));
     up.bind_i64(5, now);
-    return up.step() == SQLITE_DONE;
+    bool ok = (up.step() == SQLITE_DONE);
+    reload_auth_caches_locked();
+    return ok;
 }
 
 std::vector<SessionRecord> Database::list_sessions(std::optional<int64_t> user_id) {
@@ -677,32 +878,10 @@ bool Database::evict_session(int64_t user_id, std::string_view device_key) {
     Stmt st(db_, "UPDATE x_sessions SET status = 1 WHERE user_id = ?1 AND device_key = ?2;");
     st.bind_i64(1, user_id);
     st.bind_str(2, device_key);
-    return st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0;
+    bool ok = (st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0);
+    if (ok) reload_auth_caches_locked();
+    return ok;
 }
-
-namespace {
-StorageRecord row_to_storage(const Stmt& st, std::string_view master_secret) {
-    StorageRecord s;
-    s.id               = st.col_i64(0);
-    s.mount_path       = clean_vpath(st.col_str(1)).value_or("/");
-    s.order_idx        = st.col_int(2);
-    s.driver           = st.col_str(3);
-    s.cache_expiration = st.col_int(4);
-    s.status           = st.col_str(5);
-    s.addition         = vault_decrypt(master_secret, st.col_str(6));
-    s.remark           = st.col_str(7);
-    s.modified         = st.col_i64(8);
-    s.disabled         = st.col_int(9) != 0;
-    s.enable_sign      = st.col_int(10) != 0;
-    s.order_by         = st.col_str(11);
-    s.order_direction  = st.col_str(12);
-    s.extract_folder   = st.col_str(13);
-    s.web_proxy        = st.col_int(14) != 0;
-    s.webdav_policy    = st.col_str(15);
-    s.down_proxy_url   = st.col_str(16);
-    return s;
-}
-} // namespace
 
 std::vector<StorageRecord> Database::list_storages(bool enabled_only) {
     std::lock_guard<std::recursive_mutex> lk(mu_);
@@ -732,7 +911,7 @@ std::optional<StorageRecord> Database::get_storage(int64_t id) {
 
 int64_t Database::create_storage(StorageRecord rec) {
     auto mp = clean_vpath(rec.mount_path);
-    if (!mp || *mp == "/") return 0; // Disallow mounting directly over root "/"
+    if (!mp || *mp == "/") return 0;
     std::lock_guard<std::recursive_mutex> lk(mu_);
     Stmt st(db_, "INSERT INTO x_storages(mount_path, order_idx, driver, cache_expiration, status, addition_enc, "
                  "remark, modified, disabled, enable_sign, order_by, order_direction, extract_folder, web_proxy, "
@@ -800,48 +979,22 @@ bool Database::delete_storage(int64_t id) {
     return st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0;
 }
 
-namespace {
-MetaRecord row_to_meta(const Stmt& st, std::string_view master_secret) {
-    MetaRecord m;
-    m.id         = st.col_i64(0);
-    m.path       = clean_vpath(st.col_str(1)).value_or("/");
-    m.password   = vault_decrypt(master_secret, st.col_str(2));
-    m.p_sub      = st.col_int(3) != 0;
-    m.write      = st.col_int(4) != 0;
-    m.w_sub      = st.col_int(5) != 0;
-    m.hide       = st.col_str(6);
-    m.h_sub      = st.col_int(7) != 0;
-    m.readme     = st.col_str(8);
-    m.r_sub      = st.col_int(9) != 0;
-    m.header     = st.col_str(10);
-    m.header_sub = st.col_int(11) != 0;
-    return m;
-}
-} // namespace
-
 std::vector<MetaRecord> Database::list_metas() {
-    std::lock_guard<std::recursive_mutex> lk(mu_);
-    std::vector<MetaRecord> out;
-    Stmt st(db_, "SELECT id, path, password, p_sub, write_allow, w_sub, hide, h_sub, readme, r_sub, header, header_sub "
-                 "FROM x_metas ORDER BY LENGTH(path) DESC;");
-    while (st.step() == SQLITE_ROW) {
-        out.push_back(row_to_meta(st, master_secret_));
-    }
-    return out;
+    std::shared_lock<std::shared_mutex> rlk(cache_mu_);
+    return metas_cache_;
 }
 
 std::optional<MetaRecord> Database::get_meta(int64_t id) {
-    std::lock_guard<std::recursive_mutex> lk(mu_);
-    Stmt st(db_, "SELECT id, path, password, p_sub, write_allow, w_sub, hide, h_sub, readme, r_sub, header, header_sub "
-                 "FROM x_metas WHERE id = ?1;");
-    st.bind_i64(1, id);
-    if (st.step() != SQLITE_ROW) return std::nullopt;
-    return row_to_meta(st, master_secret_);
+    std::shared_lock<std::shared_mutex> rlk(cache_mu_);
+    for (const auto& m : metas_cache_) {
+        if (m.id == id) return m;
+    }
+    return std::nullopt;
 }
 
 std::optional<MetaRecord> Database::find_nearest_meta(std::string_view clean_path) {
-    auto metas = list_metas();
-    for (const auto& m : metas) {
+    std::shared_lock<std::shared_mutex> rlk(cache_mu_);
+    for (const auto& m : metas_cache_) {
         if (is_subpath(m.path, clean_path)) {
             return m;
         }
@@ -867,7 +1020,9 @@ int64_t Database::create_meta(const MetaRecord& meta) {
     st.bind_str(10, meta.header);
     st.bind_int(11, meta.header_sub ? 1 : 0);
     if (st.step() != SQLITE_DONE) return 0;
-    return sqlite3_last_insert_rowid(db_);
+    int64_t id = sqlite3_last_insert_rowid(db_);
+    reload_metas_cache_locked();
+    return id;
 }
 
 bool Database::update_meta(const MetaRecord& meta) {
@@ -888,37 +1043,19 @@ bool Database::update_meta(const MetaRecord& meta) {
     st.bind_str(10, meta.header);
     st.bind_int(11, meta.header_sub ? 1 : 0);
     st.bind_i64(12, meta.id);
-    return st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0;
+    bool ok = (st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0);
+    if (ok) reload_metas_cache_locked();
+    return ok;
 }
 
 bool Database::delete_meta(int64_t id) {
     std::lock_guard<std::recursive_mutex> lk(mu_);
     Stmt st(db_, "DELETE FROM x_metas WHERE id = ?1;");
     st.bind_i64(1, id);
-    return st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0;
+    bool ok = (st.step() == SQLITE_DONE && sqlite3_changes(db_) > 0);
+    if (ok) reload_metas_cache_locked();
+    return ok;
 }
-
-namespace {
-ShareRecord row_to_share(const Stmt& st) {
-    ShareRecord s;
-    s.id            = st.col_i64(0);
-    s.share_id      = st.col_str(1);
-    s.creator_id    = st.col_i64(2);
-    s.creator_name  = st.col_str(3);
-    s.path          = clean_vpath(st.col_str(4)).value_or("/");
-    s.is_dir        = st.col_int(5) != 0;
-    s.password_hash = st.col_str(6);
-    s.has_password  = !s.password_hash.empty();
-    s.expires_at    = st.col_i64(7);
-    s.max_downloads = st.col_i64(8);
-    s.downloads     = st.col_i64(9);
-    s.views         = st.col_i64(10);
-    s.disabled      = st.col_int(11) != 0;
-    s.created_at    = st.col_i64(12);
-    s.updated_at    = st.col_i64(13);
-    return s;
-}
-} // namespace
 
 std::vector<ShareRecord> Database::list_shares(std::optional<int64_t> creator_id) {
     std::lock_guard<std::recursive_mutex> lk(mu_);
@@ -981,7 +1118,6 @@ bool Database::update_share(const ShareRecord& share) {
 bool Database::increment_share_counter(std::string_view share_id, bool is_download) {
     std::lock_guard<std::recursive_mutex> lk(mu_);
     if (is_download) {
-        // Atomically enforce max_downloads limit in SQL so concurrent downloads cannot bypass quota!
         Stmt st(db_, "UPDATE x_shares SET downloads = downloads + 1 WHERE share_id = ?1 "
                      "AND disabled = 0 AND (max_downloads = 0 OR downloads < max_downloads);");
         st.bind_str(1, share_id);
@@ -1042,7 +1178,7 @@ void Database::remove_index_prefix(std::string_view path_prefix) {
     Stmt del1(db_, "DELETE FROM x_search_fts WHERE full_path = ?1 OR (full_path > ?2 AND full_path < ?3);");
     del1.bind_str(1, *p);
     del1.bind_str(2, *p + "/");
-    del1.bind_str(3, *p + "0"); // ASCII '/' is 0x2F, '0' is 0x30 -> exact range scan!
+    del1.bind_str(3, *p + "0");
     del1.step();
 }
 
@@ -1068,8 +1204,6 @@ std::pair<std::vector<SearchHit>, int64_t> Database::search_files(
     keywords = trim_ascii(keywords);
     if (keywords.empty()) return {hits, 0};
 
-    // Build safe FTS5 query: quote each whitespace-delimited token as a literal prefix ("tok"*)
-    // so special FTS5 operators (AND/OR/NEAR/column:/quotes) can NEVER cause syntax errors or injection!
     std::string fts_expr;
     for (auto tok : split_sv(keywords, ' ', true)) {
         std::string clean_tok;
@@ -1085,7 +1219,7 @@ std::pair<std::vector<SearchHit>, int64_t> Database::search_files(
     std::string clean_scope = clean_vpath(scope_parent).value_or("/");
     if (page < 1) page = 1;
     if (per_page < 1 || per_page > 500) per_page = 50;
-    int offset = (page - 1) * per_page;
+    const int64_t offset = (static_cast<int64_t>(page) - 1) * static_cast<int64_t>(per_page);
 
     std::lock_guard<std::recursive_mutex> lk(mu_);
     Stmt st(db_, "SELECT parent_path, name, is_dir, size, file_type FROM x_search_fts "
@@ -1110,8 +1244,11 @@ std::pair<std::vector<SearchHit>, int64_t> Database::search_files(
     }
 
     int64_t total = static_cast<int64_t>(filtered.size());
-    for (int i = offset; i < static_cast<int>(filtered.size()) && i < offset + per_page; ++i) {
-        hits.push_back(std::move(filtered[static_cast<size_t>(i)]));
+    if (offset < total) {
+        const size_t begin = static_cast<size_t>(offset);
+        const size_t end = begin + std::min(static_cast<size_t>(per_page), filtered.size() - begin);
+        hits.reserve(end - begin);
+        for (size_t i = begin; i < end; ++i) hits.push_back(std::move(filtered[i]));
     }
     return {std::move(hits), total};
 }
