@@ -676,6 +676,19 @@ void test_live_http_api_webdav_and_concurrency() {
     CHECK(huge_page_json && huge_page_json->get("code").as_i64() == 200 &&
           huge_page_json->get("data").get("content").as_array().empty());
 
+    JsonValue too_many_names = JsonValue::array();
+    for (int i = 0; i < 101; ++i) too_many_names.push_back("item" + std::to_string(i));
+    std::string oversized_batch_body = JsonValue::object({
+        {"src_dir", "/local/alice_home"}, {"dst_dir", "/local/alice_home"},
+        {"names", std::move(too_many_names)}, {"as_task", true}
+    }).dump();
+    auto oversized_batch = raw_http_call(port,
+        "POST /api/fs/copy HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + admin_jwt +
+        "\r\nContent-Length: " + std::to_string(oversized_batch_body.size()) +
+        "\r\nConnection: close\r\n\r\n" + oversized_batch_body);
+    auto oversized_batch_json = JsonValue::parse(oversized_batch.body);
+    CHECK(oversized_batch_json && oversized_batch_json->get("code").as_i64() == 400);
+
     // The streaming chunk parser must reject overflowing lengths and leave no partial file.
     auto oversized_upload = raw_http_call(port,
         "PUT /api/fs/put HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + admin_jwt +

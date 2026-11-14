@@ -841,6 +841,8 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
         auto dst_dir = vfs_.resolve_user_path(user, body.get("dst_dir").as_str());
         if (!src_dir || !dst_dir) { json_err(resp, 400, "Invalid source or destination"); return; }
 
+        const auto& names = body.get("names").as_array();
+        if (names.size() > 100) { json_err(resp, 400, "A maximum of 100 items can be moved or copied per request"); return; }
         bool is_move = (req.path == "/api/fs/move");
         PermissionBit bit = is_move ? PermMove : PermCopy;
         if (!vfs_.can_write_path(user, *dst_dir, bit) || !vfs_.is_path_in_role_scope(user, *dst_dir)) {
@@ -868,7 +870,9 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
                 }
                 bool async_task = body.get("as_task").as_bool(false);
                 if (async_task) {
-                    task_ids.push_back(tasks_.enqueue_copy(user.username, *src_full, *dst_dir));
+                    auto task_id = tasks_.enqueue_copy(user.username, *src_full, *dst_dir);
+                    if (task_id.empty()) { json_err(resp, 429, "Task queue is full; some earlier items may already have been queued"); return; }
+                    task_ids.push_back(std::move(task_id));
                 } else {
                     if (!vfs_.copy_obj_sync(*src_full, *dst_dir, err)) { json_err(resp, 500, err); return; }
                 }
@@ -922,15 +926,19 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
             json_err(resp, 403, "Offline download permission denied");
             return;
         }
+        const auto& urls = body.get("urls").as_array();
+        if (urls.size() > 100) { json_err(resp, 400, "A maximum of 100 offline downloads can be queued per request"); return; }
         JsonValue tids = JsonValue::array();
-        for (const auto& uv : body.get("urls").as_array()) {
+        for (const auto& uv : urls) {
             std::string u = uv.as_str();
             std::string verr;
             if (!validate_outbound_url(u, cfg_.allow_private_net_outbound, &verr)) {
                 json_err(resp, 400, verr);
                 return;
             }
-            tids.push_back(tasks_.enqueue_offline_download(user.username, std::move(u), *gdir));
+            auto task_id = tasks_.enqueue_offline_download(user.username, std::move(u), *gdir);
+            if (task_id.empty()) { json_err(resp, 429, "Task queue is full; some earlier URLs may already have been queued"); return; }
+            tids.push_back(std::move(task_id));
         }
         json_ok(resp, JsonValue::object({{"tasks", std::move(tids)}}));
         return;

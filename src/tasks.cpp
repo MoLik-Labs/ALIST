@@ -8,6 +8,10 @@
 #include <unistd.h>
 
 namespace alist {
+namespace {
+constexpr size_t kMaxActiveTasks = 256;
+constexpr size_t kMaxTaskHistory = 2000;
+}
 
 TaskManager::TaskManager(VfsEngine& vfs, int num_workers) : vfs_(vfs) {
     int n = std::clamp(num_workers, 1, 16);
@@ -95,8 +99,13 @@ std::string TaskManager::enqueue_copy(std::string creator, std::string src_vpath
     std::string id = t->rec.id;
     {
         std::lock_guard<std::mutex> lk(mu_);
-        // Bound task history to 2000 items
-        if (all_tasks_.size() > 2000) clear_done_tasks_unlocked("");
+        size_t active = 0;
+        for (const auto& [_, existing] : all_tasks_) {
+            if (existing->rec.state == "pending" || existing->rec.state == "running") ++active;
+        }
+        if (active >= kMaxActiveTasks) return {};
+        // Keep completed history bounded without discarding in-flight work.
+        if (all_tasks_.size() >= kMaxTaskHistory) clear_done_tasks_unlocked("");
         all_tasks_[id] = t;
         queue_.push_back(std::move(t));
     }
@@ -143,16 +152,24 @@ std::string TaskManager::enqueue_offline_download(std::string creator, std::stri
         req.timeout_ms = 1800000;
         req.on_headers = [&](int, const std::map<std::string, std::string>& hdrs) {
             if (auto it = hdrs.find("content-length"); it != hdrs.end()) {
-                expected_len = parse_i64(it->second).value_or(0);
+                expected_len = std::max<int64_t>(0, parse_i64(it->second).value_or(0));
             }
         };
         req.on_data = [&](const char* d, size_t n) -> bool {
             if (self.cancel_flag.load()) return false;
-            if (downloaded + static_cast<int64_t>(n) > vfs_.config().max_upload_bytes) {
+            const int64_t limit = std::max<int64_t>(0, vfs_.config().max_upload_bytes);
+            if (downloaded < 0 || downloaded > limit ||
+                n > static_cast<uint64_t>(limit - downloaded)) {
                 err = "Offline download exceeded max_upload_bytes limit";
                 return false;
             }
-            if (::write(wfd.get(), d, n) != static_cast<ssize_t>(n)) return false;
+            size_t written = 0;
+            while (written < n) {
+                ssize_t amount = ::write(wfd.get(), d + written, n - written);
+                if (amount < 0 && errno == EINTR) continue;
+                if (amount <= 0) { err = "Failed writing offline download to temporary file"; return false; }
+                written += static_cast<size_t>(amount);
+            }
             downloaded += static_cast<int64_t>(n);
             if (expected_len > 0) {
                 std::lock_guard<std::mutex> lk(mu_);
@@ -184,7 +201,12 @@ std::string TaskManager::enqueue_offline_download(std::string creator, std::stri
     std::string id = t->rec.id;
     {
         std::lock_guard<std::mutex> lk(mu_);
-        if (all_tasks_.size() > 2000) clear_done_tasks_unlocked("");
+        size_t active = 0;
+        for (const auto& [_, existing] : all_tasks_) {
+            if (existing->rec.state == "pending" || existing->rec.state == "running") ++active;
+        }
+        if (active >= kMaxActiveTasks) return {};
+        if (all_tasks_.size() >= kMaxTaskHistory) clear_done_tasks_unlocked("");
         all_tasks_[id] = t;
         queue_.push_back(std::move(t));
     }
