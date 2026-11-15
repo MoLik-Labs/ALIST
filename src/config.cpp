@@ -25,11 +25,15 @@ std::string env_or(const char* name, const std::string& fallback) {
     const char* v = std::getenv(name);
     return (v && *v) ? std::string(v) : fallback;
 }
-int env_int_or(const char* name, int fallback) {
+int bounded_int(const JsonValue& value, int fallback, int minimum, int maximum) {
+    const int64_t raw = value.as_i64(fallback);
+    return static_cast<int>(std::clamp<int64_t>(raw, minimum, maximum));
+}
+int env_int_or(const char* name, int fallback, int minimum, int maximum) {
     const char* v = std::getenv(name);
     if (!v || !*v) return fallback;
     auto p = parse_i64(v);
-    return p ? static_cast<int>(*p) : fallback;
+    return p ? static_cast<int>(std::clamp<int64_t>(*p, minimum, maximum)) : fallback;
 }
 bool env_bool_or(const char* name, bool fallback) {
     const char* v = std::getenv(name);
@@ -66,12 +70,12 @@ bool AppConfig::load_or_create(const std::string& data_dir_override) {
         if (j && j->is_object()) {
             site_url       = j->get("site_url").as_str(site_url);
             jwt_secret     = j->get("jwt_secret").as_str(jwt_secret);
-            token_expires_in = static_cast<int>(j->get("token_expires_in").as_i64(token_expires_in));
+            token_expires_in = bounded_int(j->get("token_expires_in"), token_expires_in, 1, 87600);
             temp_dir       = j->get("temp_dir").as_str(temp_dir);
             debug          = j->get("debug").as_bool(debug);
-            worker_threads = static_cast<int>(j->get("worker_threads").as_i64(worker_threads));
-            task_workers   = static_cast<int>(j->get("task_workers").as_i64(task_workers));
-            max_connections = static_cast<int>(j->get("max_connections").as_i64(max_connections));
+            worker_threads = bounded_int(j->get("worker_threads"), worker_threads, 0, 64);
+            task_workers   = bounded_int(j->get("task_workers"), task_workers, 1, 16);
+            max_connections = bounded_int(j->get("max_connections"), max_connections, 1, 65536);
             allow_private_net_outbound = j->get("allow_private_net_outbound").as_bool(allow_private_net_outbound);
             tls_insecure_skip_verify = j->get("tls_insecure_skip_verify").as_bool(tls_insecure_skip_verify);
             trust_proxy = j->get("trust_proxy").as_bool(trust_proxy);
@@ -79,7 +83,7 @@ bool AppConfig::load_or_create(const std::string& data_dir_override) {
             const auto& sch = j->get("scheme");
             if (sch.is_object()) {
                 address   = sch.get("address").as_str(address);
-                http_port = static_cast<int>(sch.get("http_port").as_i64(http_port));
+                http_port = bounded_int(sch.get("http_port"), http_port, 1, 65535);
             }
             const auto& dbj = j->get("database");
             if (dbj.is_object()) {
@@ -102,10 +106,10 @@ bool AppConfig::load_or_create(const std::string& data_dir_override) {
 
     // Environment variable overrides (Docker / Cloud / CI friendly)
     address        = env_or("ALIST_ADDR", env_or("ADDR", address));
-    http_port      = env_int_or("ALIST_HTTP_PORT", env_int_or("PORT", http_port));
+    http_port      = env_int_or("ALIST_HTTP_PORT", env_int_or("PORT", http_port, 1, 65535), 1, 65535);
     site_url       = env_or("ALIST_SITE_URL", site_url);
     jwt_secret     = env_or("ALIST_JWT_SECRET", jwt_secret);
-    token_expires_in = env_int_or("ALIST_TOKEN_EXPIRES_IN", token_expires_in);
+    token_expires_in = env_int_or("ALIST_TOKEN_EXPIRES_IN", token_expires_in, 1, 87600);
     debug          = env_bool_or("ALIST_DEBUG", debug);
     allow_private_net_outbound = env_bool_or("ALIST_ALLOW_PRIVATE_NET", allow_private_net_outbound);
     trust_proxy    = env_bool_or("ALIST_TRUST_PROXY", trust_proxy);

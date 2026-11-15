@@ -195,6 +195,37 @@ RawHttpReply raw_http_call(int port, std::string_view raw_request) {
 // ============================================================================
 // 1. Path Normalization, Traversal & Symlink Confinement Tests
 // ============================================================================
+void test_config_integer_bounds() {
+    std::string dir = "/tmp/alist-config-bounds-" + std::to_string(::getpid());
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    {
+        std::ofstream f(dir + "/config.json");
+        f << R"({"token_expires_in":-9,"worker_threads":9223372036854775807,"task_workers":-9223372036854775808,"max_connections":9223372036854775807,"scheme":{"http_port":9223372036854775807}})";
+    }
+    unsetenv("ALIST_HTTP_PORT");
+    unsetenv("PORT");
+    unsetenv("ALIST_TOKEN_EXPIRES_IN");
+    AppConfig cfg;
+    CHECK(cfg.load_or_create(dir));
+    CHECK(cfg.token_expires_in == 1);
+    CHECK(cfg.worker_threads == 64);
+    CHECK(cfg.task_workers == 1);
+    CHECK(cfg.max_connections == 65536);
+    CHECK(cfg.http_port == 65535);
+
+    setenv("ALIST_HTTP_PORT", "9223372036854775807", 1);
+    setenv("ALIST_TOKEN_EXPIRES_IN", "-9223372036854775808", 1);
+    AppConfig env_cfg;
+    CHECK(env_cfg.load_or_create(dir + "/env"));
+    CHECK(env_cfg.http_port == 65535);
+    CHECK(env_cfg.token_expires_in == 1);
+    unsetenv("ALIST_HTTP_PORT");
+    unsetenv("ALIST_TOKEN_EXPIRES_IN");
+    std::filesystem::remove_all(dir, ec);
+}
+
 void test_vpath_and_symlink_security() {
     CHECK(clean_vpath("/a/b/../c//d/.").value() == "/a/c/d");
     CHECK(clean_vpath("/../../../../etc/passwd").value() == "/etc/passwd");
@@ -828,6 +859,7 @@ void test_live_http_api_webdav_and_concurrency() {
 int main() {
     std::signal(SIGPIPE, SIG_IGN);
     std::printf("\n=== AList-Core Standalone Security, Logic & Concurrency Suite ===\n");
+    RUN_TEST(test_config_integer_bounds);
     RUN_TEST(test_vpath_and_symlink_security);
     RUN_TEST(test_crypto_jwt_and_totp_security);
     RUN_TEST(test_ssrf_and_antiredos_glob);
