@@ -447,7 +447,12 @@ void Database::seed_defaults(std::string* initial_admin_pwd_out) {
     };
 
     ensure_setting("version", kVersion, "site", true);
-    ensure_setting("site_title", "AList · @nggkhaiz", "site", true);
+    ensure_setting("site_title", "Foxlist · @nggkhaiz", "site", true);
+    // Migrate the previous product default while preserving administrator-customized titles.
+    {
+        Stmt migrate_title(db_, "UPDATE x_settings SET value='Foxlist · @nggkhaiz' WHERE key='site_title' AND value='AList · @nggkhaiz';");
+        migrate_title.step();
+    }
     ensure_setting("announcement", "", "site", true);
     ensure_setting("pagination_type", "all", "site", true);
     ensure_setting("default_page_size", "50", "site", true);
