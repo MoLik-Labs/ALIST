@@ -80,3 +80,19 @@ limits JSON responses, and never returns credentials in errors. Downloads have a
 30-second deadline; large files and redirects may fail. **Mocks only:** this has
 not been exercised against a real Google account or deployed Worker. Do not use
 it for production or sensitive data. Revoke credentials after experimentation.
+
+## Access-control foundation (not integrated)
+
+`migrations/0001_access_foundation.sql` and `src/access.js` are isolated
+experimental D1-oriented primitives for private-by-default resources, explicit
+role grants and read-only bearer links with expiry and revocation. The schema
+and queries are tested against SQLite locally via `npm run test:cf-access`;
+D1 itself and real Cloudflare have not been tested. The prototype's existing
+HTTP endpoints **do not call these primitives**: they still use a single shared
+bearer token and must not be treated as a multi-user system. Authentication,
+role assignment, per-user grants, restricted-recipient links, password links,
+provider credential isolation, folder inheritance and all UI integration remain
+unimplemented. Role changes do not automatically revoke links already issued;
+links require explicit revocation or expiry. A deployment operator can access
+plaintext by changing Worker code or bindings. Do not use this as a security
+boundary until integrated and reviewed end to end.
