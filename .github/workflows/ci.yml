@@ -46,6 +46,9 @@ jobs:
       - name: Test experimental Cloudflare Google Drive connector
         run: npm run test:cf-google-drive
 
+      - name: Test experimental Cloudflare Dropbox connector
+        run: npm run test:cf-dropbox
+
       - name: Test experimental Cloudflare access foundation
         run: npm run test:cf-access
 

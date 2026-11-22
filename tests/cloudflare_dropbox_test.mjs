@@ -1,0 +1,51 @@
+import assert from 'node:assert/strict';
+import {handleRequest} from '../deploy/cloudflare-native/src/index.js';
+const secret = 'test-only-kova-token-at-least-32-characters';
+const env = {KOVA_NATIVE_TOKEN:secret,KOVA_EXPERIMENTAL_DROPBOX:'enabled',DROPBOX_ACCESS_TOKEN:'dropbox-secret'};
+const req = (path, token=secret, method='GET') => new Request('https://worker.test'+path,{method,headers:{authorization:`Bearer ${token}`}});
+const original = globalThis.fetch, calls=[];
+let mode='list';
+globalThis.fetch = async (url, options) => {
+  calls.push({url:String(url),options});
+  if (mode==='redirect') return new Response(null,{status:302,headers:{location:'https://evil.test'}});
+  if (mode==='quota') return new Response('dropbox-secret',{status:429});
+  if (mode==='large') return new Response('x'.repeat(1024*1024+1));
+  if (mode==='bad') return Response.json({entries:[],has_more:true,cursor:''});
+  if (mode==='download') return new Response('data',{headers:{'content-type':'text/html','set-cookie':'private=value','content-length':'4'}});
+  return Response.json({entries:[{'.tag':'folder',name:'Ảnh',path_display:'/Ảnh',extra:'ignored'},{'.tag':'file',name:'photo',path_display:'/Ảnh/photo',size:4,extra:'ignored'}],has_more:true,cursor:'opaque-cursor',secret:'ignored'});
+};
+try {
+  assert.equal((await handleRequest(req('/v1/dropbox/files'),{...env,KOVA_EXPERIMENTAL_DROPBOX:undefined})).status,404);
+  assert.equal((await handleRequest(req('/v1/dropbox/files','bad'),env)).status,401);
+  assert.equal((await handleRequest(req('/v1/dropbox/files',secret,'PUT'),env)).status,405);
+  assert.equal((await handleRequest(req('/v1/dropbox/files'),{...env,DROPBOX_ACCESS_TOKEN:undefined})).status,503);
+  for (const path of ['/v1/dropbox/files?path=/../x','/v1/dropbox/files?path=/a//b','/v1/dropbox/files?path=x','/v1/dropbox/files?path=/a&cursor=b','/v1/dropbox/files?cursor=','/v1/dropbox/file?path=','/v1/dropbox/file?path=/a&path=/b'])
+    assert.equal((await handleRequest(req(path),env)).status,400,path);
+  assert.equal(calls.length,0);
+  let response = await handleRequest(req('/v1/dropbox/files?path='+encodeURIComponent('/Ảnh')),env);
+  assert.equal(response.status,200);
+  assert.deepEqual(await response.json(),{entries:[{type:'folder',name:'Ảnh',path:'/Ảnh'},{type:'file',name:'photo',path:'/Ảnh/photo',size:4}],nextCursor:'opaque-cursor'});
+  assert.equal(calls[0].url,'https://api.dropboxapi.com/2/files/list_folder');
+  assert.equal(calls[0].options.redirect,'manual');
+  assert.equal(JSON.parse(calls[0].options.body).path,'/Ảnh');
+  response = await handleRequest(req('/v1/dropbox/files?cursor=opaque-cursor'),env);
+  assert.equal(response.status,200);
+  assert.equal(calls[1].url,'https://api.dropboxapi.com/2/files/list_folder/continue');
+  assert.deepEqual(JSON.parse(calls[1].options.body),{cursor:'opaque-cursor'});
+  mode='download';
+  response=await handleRequest(req('/v1/dropbox/file?path='+encodeURIComponent('/Ảnh/photo')),env);
+  assert.equal(response.status,200);
+  assert.equal(calls.at(-1).url,'https://content.dropboxapi.com/2/files/download');
+  assert.equal(calls.at(-1).options.method,'POST');
+  assert.match(calls.at(-1).options.headers['dropbox-api-arg'],/\\u/);
+  assert.deepEqual(JSON.parse(calls.at(-1).options.headers['dropbox-api-arg']),{path:'/Ảnh/photo'});
+  assert.equal(response.headers.get('content-type'),'application/octet-stream');
+  assert.equal(response.headers.get('set-cookie'),null);
+  assert.equal(await response.text(),'data');
+  mode='redirect'; response=await handleRequest(req('/v1/dropbox/file?path=/x'),env);
+  assert.equal(response.status,502); assert.equal(response.headers.get('location'),null);
+  mode='quota'; response=await handleRequest(req('/v1/dropbox/files'),env);
+  assert.equal(response.status,503); assert.ok(!(await response.text()).includes('dropbox-secret'));
+  for (mode of ['large','bad']) assert.equal((await handleRequest(req('/v1/dropbox/files'),env)).status,502);
+  console.log('Experimental Dropbox connector tests passed');
+} finally {globalThis.fetch=original;}

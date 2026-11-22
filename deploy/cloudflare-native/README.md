@@ -93,6 +93,26 @@ body; network failures, platform limits and redirects may still interrupt transf
 **Mocks only:** this has not been exercised against a real Google account or deployed Worker. Do not use
 it for production or sensitive data. Revoke credentials after experimentation.
 
+## Experimental Dropbox connector
+
+The separate **disabled-by-default, single-account** Dropbox experiment offers
+`GET /v1/dropbox/files?path=` (root is empty; a returned `nextCursor` can be
+passed as `?cursor=...` instead of `path`) and
+`GET /v1/dropbox/file?path=/folder/file` for read-only downloads. Paths must be
+absolute and must not contain dot segments. Listing is not recursive. Download
+Range requests are not supported. Explicitly set `KOVA_EXPERIMENTAL_DROPBOX` to
+`enabled` and configure `DROPBOX_ACCESS_TOKEN` and `KOVA_NATIVE_TOKEN` as runtime
+secrets on an isolated test Worker. Anyone possessing the shared Kova token can
+access **all Dropbox content authorized to that Dropbox token**; this is not a
+multi-user security boundary. Never use production credentials or sensitive data.
+
+This uses fixed Dropbox API hosts and never follows redirects. Dropbox access
+tokens expire; refresh/OAuth, per-user isolation, upload, shares, rate limiting,
+UI integration and real-provider testing remain unimplemented. Local tests use
+mock responses, not Dropbox. Revoke test credentials after use. Dropbox quotas
+and permissions apply. The existing owner-scoped v2 Google connector does not
+provide owner-scoped Dropbox connections.
+
 ## Access-control foundation (not integrated)
 
 `migrations/0001_access_foundation.sql` and `src/access.js` are isolated

@@ -7,13 +7,18 @@ const privateKey=await crypto.subtle.exportKey('jwk',pair.privateKey);
 const key=Buffer.alloc(32,4).toString('base64url');
 const root = new URL('../deploy/cloudflare-native/src/',import.meta.url);
 const modules=[];
-for (const name of ['index.js','connected-drive.js','google-drive.js','google-oauth.js','google-login.js','google-identity.js','credential-vault.js','sessions.js'])
+for (const name of ['index.js','connected-drive.js','google-drive.js','dropbox.js','google-oauth.js','google-login.js','google-identity.js','credential-vault.js','sessions.js'])
   modules.push({type:'ESModule',path:`${process.cwd()}/app/${name}`,contents:await readFile(new URL(name,root),'utf8')});
 const harness=`import {handleRequest} from './app/index.js';
 import {createGoogleConnection} from './app/credential-vault.js';
 const key = '${key}'; let nonce;
 const encode = x => btoa(JSON.stringify(x)).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');
 globalThis.fetch = async (url, options) => {
+ if (String(url)==='https://api.dropboxapi.com/2/files/list_folder') return Response.json({entries:[{'.tag':'file',name:'Ảnh',path_display:'/Ảnh',size:2}],cursor:'next',has_more:false});
+ if (String(url)==='https://content.dropboxapi.com/2/files/download') {
+  if (JSON.parse(options.headers['dropbox-api-arg']).path !== '/Ảnh') throw Error('invalid Dropbox path');
+  return new Response('ok');
+ }
  if (String(url)==='https://www.googleapis.com/oauth2/v3/certs') return Response.json({keys:[${JSON.stringify(publicKey)}]});
  if (String(url).startsWith('https://www.googleapis.com/drive/v3/files?')) {
   if (new URL(url).searchParams.get('q') !== "'root' in parents and trashed = false and name contains 'My'") throw Error('unexpected query');
@@ -36,7 +41,11 @@ globalThis.fetch = async (url, options) => {
  return Response.json({id_token:h+'.'+p+'.'+sig});
 };
 export default {async fetch(req,env){
- const config={DB:env.DB,KOVA_CREDENTIAL_KEY:key,KOVA_EXPERIMENTAL_V2:'enabled',KOVA_EXPERIMENTAL_LOGIN:'enabled',GOOGLE_CLIENT_ID:'client',GOOGLE_CLIENT_SECRET:'secret',KOVA_LOGIN_REDIRECT:'https://worker.test/v2/auth/google/callback'};
+ const config={DB:env.DB,KOVA_CREDENTIAL_KEY:key,KOVA_EXPERIMENTAL_V2:'enabled',KOVA_EXPERIMENTAL_LOGIN:'enabled',GOOGLE_CLIENT_ID:'client',GOOGLE_CLIENT_SECRET:'secret',KOVA_LOGIN_REDIRECT:'https://worker.test/v2/auth/google/callback',KOVA_EXPERIMENTAL_DROPBOX:'enabled',DROPBOX_ACCESS_TOKEN:'test-token',KOVA_NATIVE_TOKEN:'test-only-native-token-at-least-32-characters'};
+ const dropHeaders={authorization:'Bearer '+config.KOVA_NATIVE_TOKEN};
+ const dropList=await handleRequest(new Request('https://worker.test/v1/dropbox/files',{headers:dropHeaders}),config);
+ const dropFile=await handleRequest(new Request('https://worker.test/v1/dropbox/file?path='+encodeURIComponent('/Ảnh'),{headers:dropHeaders}),config);
+ const dropbox={listing:await dropList.json(),status:dropFile.status,body:await dropFile.text()};
  const start=await handleRequest(new Request('https://worker.test/v2/auth/google/start',{method:'POST',headers:{origin:'https://worker.test','content-type':'application/json'}}),config);
  const cookie=start.headers.get('set-cookie').split(';')[0], auth=new URL((await start.json()).authorizationUrl); nonce=auth.searchParams.get('nonce');
  const callback=()=>new Request('https://worker.test/v2/auth/google/callback?code=code&state='+auth.searchParams.get('state'),{headers:{cookie}});
@@ -56,7 +65,7 @@ export default {async fetch(req,env){
  const driveAfter=await handleRequest(new Request('https://worker.test/v2/google-drive/files?connection='+connection,{headers:{authorization:'Bearer '+data.token}}),config);
  const logout=await handleRequest(new Request('https://worker.test/v2/logout',{method:'POST',headers:{authorization:'Bearer '+data.token}}),config);
  const after=await handleRequest(new Request('https://worker.test/v2/me',{headers:{authorization:'Bearer '+data.token}}),config);
- return Response.json({start:start.status,finish:finish.status,me:await me.json(),connections:connections.status,connectionListed:listData.connections.length === 1 && listData.connections[0].id === connection && listData.connections[0].provider === 'google_drive',drive:drive.status,listing,rangeResult,exportResult,disconnect:disconnect.status,disconnected,driveAfter:driveAfter.status,logout:logout.status,after:after.status,replay:(await handleRequest(callback(),config)).status});
+ return Response.json({dropbox,start:start.status,finish:finish.status,me:await me.json(),connections:connections.status,connectionListed:listData.connections.length === 1 && listData.connections[0].id === connection && listData.connections[0].provider === 'google_drive',drive:drive.status,listing,rangeResult,exportResult,disconnect:disconnect.status,disconnected,driveAfter:driveAfter.status,logout:logout.status,after:after.status,replay:(await handleRequest(callback(),config)).status});
 }};`;
 modules.unshift({type:'ESModule',path:`${process.cwd()}/entry.js`,contents:harness});
 const mf=new Miniflare(convertV4MiniflareOptions({modules,compatibilityDate:'2026-11-16',d1Databases:['DB']}));
@@ -68,6 +77,6 @@ try {
  }
  await db.batch([db.prepare("INSERT INTO users(id,username) VALUES('alice','alice')"),db.prepare("INSERT INTO external_identities VALUES('google','google-subject','alice')")]);
  const response=await mf.dispatchFetch('http://localhost/test'); assert.equal(response.status,200);
- assert.deepEqual(await response.json(),{start:200,finish:200,me:{id:'alice'},connections:200,connectionListed:true,drive:200,listing:{files:[{id:'f',name:'My file',mimeType:'text/plain'}],nextPageToken:null},rangeResult:{status:206,range:'bytes 2-4/6',body:'cde'},exportResult:{status:200,body:'pdf'},disconnect:200,disconnected:{ok:true,providerRevoked:false},driveAfter:404,logout:200,after:401,replay:400});
+ assert.deepEqual(await response.json(),{dropbox:{listing:{entries:[{type:'file',name:'Ảnh',path:'/Ảnh',size:2}],nextCursor:null},status:200,body:'ok'},start:200,finish:200,me:{id:'alice'},connections:200,connectionListed:true,drive:200,listing:{files:[{id:'f',name:'My file',mimeType:'text/plain'}],nextPageToken:null},rangeResult:{status:206,range:'bytes 2-4/6',body:'cde'},exportResult:{status:200,body:'pdf'},disconnect:200,disconnected:{ok:true,providerRevoked:false},driveAfter:404,logout:200,after:401,replay:400});
  console.log('Experimental Google login workerd and D1 emulator tests passed');
 } finally {await mf.dispose();}

@@ -1,6 +1,7 @@
 // Experimental standalone Cloudflare-native R2 API. This is NOT the Kova
 // API or a production-ready server. Do not attach production data.
 import { googleDriveRequest } from './google-drive.js';
+import { dropboxRequest } from './dropbox.js';
 import { connectedDriveRequest } from './connected-drive.js';
 import { googleOauthRequest } from './google-oauth.js';
 import { googleLoginRequest } from './google-login.js';
@@ -44,6 +45,10 @@ export async function handleRequest(request, env) {
   if (url.pathname.startsWith('/v1/google-drive/')) {
     if (request.method !== 'GET') return json(405, { error: 'Method not allowed' });
     return googleDriveRequest(url, env, request.headers);
+  }
+  if (url.pathname.startsWith('/v1/dropbox/')) {
+    if (request.method !== 'GET') return json(405, { error: 'Method not allowed' });
+    return dropboxRequest(url, env);
   }
   if (!env.R2) return json(503, { error: 'R2 is not configured' });
   try {
