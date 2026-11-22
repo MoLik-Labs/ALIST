@@ -14,7 +14,11 @@ or find the generated initial password in protected service logs. A supplied
 password is not logged; protect any bootstrap logs containing generated passwords. The variable
 only initializes a new database; changing it later does not reset the account.
 Protect logs and secrets. Keep `/opt/alist/data` private and writable by the
-container's configured PUID/PGID. `/ping` checks process liveness, not storage
+container's configured PUID/PGID. The image honors `ALIST_DATA_DIR` as an
+explicit directory override; when running as root, custom directories must
+already be writable by PUID/PGID and are not recursively chowned. With an
+orchestrator-provided non-root UID, PUID/PGID cannot change the process identity
+and the mounted directory must already be writable by that UID. `/ping` checks process liveness, not storage
 readiness or end-to-end access. Verify login, file access, WebDAV if used, and
 restart/restore after deployment.
 
@@ -71,7 +75,10 @@ downtime. The configuration has not yet been deployed to Fly for verification.
 ## Heroku
 
 The root `heroku.yml` builds the native Docker image; use Heroku Container
-Stack as shown in the README. Heroku provides `PORT`. **Standard dynos have an
+Stack as shown in the README. Heroku provides `PORT` and runs the container
+with an arbitrary non-root user. If `ALIST_DATA_DIR` is not set, the entrypoint
+creates a private temporary directory and prints a data-loss warning; every
+process start creates a fresh directory. This behavior is for demos only. **Standard dynos have an
 ephemeral filesystem** and do not provide the persistent mounted volume this
 server requires. Restarts or deploys can lose accounts, keys and mounts. Use
 this only for disposable demos; an S3 mount alone does not solve metadata
