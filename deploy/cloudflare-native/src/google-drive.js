@@ -3,6 +3,15 @@
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const DRIVE_URL = 'https://www.googleapis.com/drive/v3/files';
 const MAX_JSON_BYTES = 1024 * 1024;
+// Fixed export types prevent arbitrary upstream content negotiation.
+const EXPORT_FORMATS = Object.freeze({
+  pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  txt: 'text/plain',
+  csv: 'text/csv',
+});
 const error = (status, message) => json(status, { error: message });
 const json = (status, data) => new Response(JSON.stringify(data), { status, headers: {
   'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
@@ -62,13 +71,20 @@ function validPartial(range, value, length) {
 export async function googleDriveRequest(url, env, requestHeaders = new Headers()) {
   const list = url.pathname === '/v1/google-drive/files';
   const download = url.pathname === '/v1/google-drive/file';
-  if (!list && !download) return error(404, 'Not found');
-  const id = url.searchParams.get(list ? 'parent' : 'id') || (list ? 'root' : '');
+  const exporting = url.pathname === '/v1/google-drive/export';
+  if (!list && !download && !exporting) return error(404, 'Not found');
+  const formats = url.searchParams.getAll('format');
+  if (exporting && (formats.length !== 1 || !Object.hasOwn(EXPORT_FORMATS, formats[0]) || requestHeaders.has('range'))) return error(400, 'Invalid export request');
+  const idName = list ? 'parent' : 'id';
+  const id = url.searchParams.get(idName) || (list ? 'root' : '');
   const cursor = url.searchParams.get('cursor') || '';
+  const name = list ? url.searchParams.get('name') : null;
   const range = download ? parseRange(requestHeaders.get('range')) : null;
   if (range === false) return error(400, 'Invalid Range header');
-  // Restrict IDs before interpolating the Drive query and encoding path segments.
-  if (!validId(id) || cursor.length > 2048 || /[\x00-\x1f\x7f]/.test(cursor)) return error(400, 'Invalid request');
+  // Reject ambiguous inputs and escape user text before embedding it in a Drive query.
+  if (url.searchParams.getAll(idName).length > 1 || url.searchParams.getAll('cursor').length > 1 ||
+      (list && url.searchParams.getAll('name').length > 1) || !validId(id) || cursor.length > 2048 || /[\x00-\x1f\x7f]/.test(cursor) ||
+      (name !== null && (!name || name.length > 200 || /[\x00-\x1f\x7f]/.test(name)))) return error(400, 'Invalid request');
   const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN } = env;
   if (![GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN].every(validSecret)) return error(503, 'Google Drive is not configured');
   try {
@@ -80,23 +96,37 @@ export async function googleDriveRequest(url, env, requestHeaders = new Headers(
     if (!tokenResponse.ok) return error(502, 'Google authorization failed');
     const token = (await readJson(tokenResponse)).access_token;
     if (!validSecret(token) || /\s/.test(token)) return error(502, 'Google authorization failed');
-    const target = new URL(list ? DRIVE_URL : `${DRIVE_URL}/${encodeURIComponent(id)}`);
+    const target = new URL(list ? DRIVE_URL : `${DRIVE_URL}/${encodeURIComponent(id)}${exporting ? '/export' : ''}`);
     if (list) {
-      target.searchParams.set('q', `'${id}' in parents and trashed = false`);
+      let query = `'${id}' in parents and trashed = false`;
+      if (name !== null) query += ` and name contains '${name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+      target.searchParams.set('q', query);
       target.searchParams.set('fields', 'nextPageToken,files(id,name,mimeType,size,modifiedTime)');
       target.searchParams.set('pageSize', '100');
       target.searchParams.set('supportsAllDrives', 'true');
       target.searchParams.set('includeItemsFromAllDrives', 'true');
       if (cursor) target.searchParams.set('pageToken', cursor);
+    } else if (exporting) {
+      target.searchParams.set('mimeType', EXPORT_FORMATS[formats[0]]);
     } else {
       target.searchParams.set('alt', 'media');
       target.searchParams.set('supportsAllDrives', 'true');
     }
     const headers = { authorization: `Bearer ${token}` };
     if (range) headers.range = requestHeaders.get('range');
-    const upstream = await fetch(target.toString(), {
-      ...fetchOptions, signal: AbortSignal.timeout(30000), headers,
-    });
+    // A fixed AbortSignal.timeout on a streaming response also aborts its
+    // body, truncating downloads after 30 seconds. Limit time to headers for
+    // downloads instead; retain the full deadline for bounded JSON listings.
+    let upstream;
+    if (download || exporting) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30000);
+      try {
+        upstream = await fetch(target.toString(), { ...fetchOptions, signal: controller.signal, headers });
+      } finally { clearTimeout(timer); }
+    } else {
+      upstream = await fetch(target.toString(), { ...fetchOptions, signal: AbortSignal.timeout(30000), headers });
+    }
     if (upstream.status === 404) return error(404, 'Not found');
     if (upstream.status === 429 || upstream.status === 503) return error(503, 'Google Drive temporarily unavailable');
     if (download && range && upstream.status === 416) {
@@ -117,7 +147,8 @@ export async function googleDriveRequest(url, env, requestHeaders = new Headers(
     }
     // Do not forward arbitrary upstream headers or redirect locations.
     const safeHeaders = { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment',
-      'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff', 'accept-ranges': 'bytes' };
+      'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' };
+    if (download) safeHeaders['accept-ranges'] = 'bytes';
     const contentLength = upstream.headers.get('content-length');
     if (contentLength && /^\d{1,19}$/.test(contentLength)) safeHeaders['content-length'] = contentLength;
     if (partial) safeHeaders['content-range'] = upstream.headers.get('content-range');

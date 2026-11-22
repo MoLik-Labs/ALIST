@@ -26,6 +26,23 @@ existing key. That behavior was tested locally, not with real R2. Do not enable
 writes or use production data until there is a security review and real-cloud
 verification.
 
+## Experimental Cloudflare interface
+
+A separate interface lives in `ui/` and is served only when an `ASSETS` binding
+is present. It is not the native Kova frontend and is not a complete Kova
+replacement. It can use experimental session, Google Drive and Dropbox v2 APIs,
+with optional browser sign-in via `KOVA_EXPERIMENTAL_BROWSER_AUTH=enabled`.
+This returns an HttpOnly, Secure, SameSite=Lax session cookie and redirects to
+the UI after login; the cookie is not accessible to JavaScript. Mutating
+cookie-authenticated requests require a same-origin Origin. Without that flag,
+the legacy experimental callback returns a bearer token for manual testing;
+manual tokens stay in tab memory, not URLs or local storage. UI downloads are limited to 8 MiB. The local Wrangler config
+binds assets for visual preview but has no D1 or login configuration; sign-in
+will not work there. The [English](../../docs/guide/cloudflare-preview.md) and
+[Tiếng Việt](../../docs/guide/vi/cloudflare-preview.md) tutorials cover its
+limitations and safe local preview. This UI and backend are not ready for
+production, real accounts, or sensitive data.
+
 ## Local runtime test (no Cloudflare account)
 
 Install the pinned Wrangler dependencies with `npm ci --ignore-scripts` in
@@ -55,14 +72,23 @@ account bindings, resource limits or real R2 behavior. Stop the server when done
 
 The isolated Worker also has a **single-account, read-only prototype**:
 `GET /v1/google-drive/files?parent=root` lists a folder (optional opaque
-`cursor`; the response has `nextPageToken`) and
+`cursor`; the response has `nextPageToken`). An optional `name` filters by
+Google Drive's `name contains` semantics within that folder; it is not a
+recursive or full-text search. Use the same filter and parent when paging. The
+owner-scoped v2 listing accepts the same filter. Additionally,
 `GET /v1/google-drive/file?id=...` streams a binary file. These routes use the
 same bearer token as the R2 API and do not require the R2 binding. Anyone with
 that token can access **all files authorized to the connected Google account**,
-not just one folder. Native Google Docs, Sheets and Slides require export and
-are not supported. Upload, search, multipart ranges, shortcuts, OAuth consent UI,
+not just one folder. Native Google Workspace documents can be exported with
+`GET /v1/google-drive/export?id=...&format=pdf` (also available under `/v2/`
+with the owner's `connection` parameter). Allowed formats are `pdf`, `docx`,
+`xlsx`, `pptx`, `txt` and `csv`; Google determines which formats apply to each
+file. CSV exports only the first sheet. Exports do not support ranges, and
+[Google limits `files.export` output to 10 MB](https://developers.google.com/drive/api/reference/rest/v3/files/export).
+Exports are served as attachments, and provider errors are not returned verbatim.
+Upload, recursive/full-text search, multipart ranges, shortcuts, OAuth consent UI,
 per-user credentials, permissions, credential revocation, rate limiting and
-multi-drive management are not implemented. There is no Kova UI integration.
+multi-drive management are not implemented. The experimental Cloudflare UI is separate from the native Kova UI.
 
 For a future isolated experiment, Google Drive API must be enabled, an OAuth
 client and an offline refresh token obtained securely with a suitable read-only
@@ -79,9 +105,81 @@ errors. Binary downloads support one validated byte range for resuming; Google
 may ignore the range and respond with the full file. It fixes upstream hosts and
 rejects redirects, strips upstream headers,
 limits JSON responses, and never returns credentials in errors. Downloads have a
-30-second deadline; large files and redirects may fail. **Mocks only:** this has
-not been exercised against a real Google account or deployed Worker. Do not use
+30-second deadline for response headers, not a fixed deadline for the streamed
+body; network failures, platform limits and redirects may still interrupt transfers.
+**Mocks only:** this has not been exercised against a real Google account or deployed Worker. Do not use
 it for production or sensitive data. Revoke credentials after experimentation.
+
+## Experimental Dropbox connector
+
+The separate **disabled-by-default, single-account** Dropbox experiment offers
+`GET /v1/dropbox/files?path=` (root is empty; a returned `nextCursor` can be
+passed as `?cursor=...` instead of `path`) and
+`GET /v1/dropbox/file?path=/folder/file` for read-only downloads. Paths must be
+absolute and must not contain dot segments. Listing is not recursive. Download
+Range requests are not supported. Explicitly set `KOVA_EXPERIMENTAL_DROPBOX` to
+`enabled` and configure `DROPBOX_ACCESS_TOKEN` and `KOVA_NATIVE_TOKEN` as runtime
+secrets on an isolated test Worker. Anyone possessing the shared Kova token can
+access **all Dropbox content authorized to that Dropbox token**; this is not a
+multi-user security boundary. Never use production credentials or sensitive data.
+
+An additional, separately disabled owner-scoped experiment requires both
+`KOVA_EXPERIMENTAL_V2=enabled` and `KOVA_EXPERIMENTAL_DROPBOX_V2=enabled`,
+D1 migrations through `0007_dropbox_connections.sql`, a valid vault key, and a
+pre-established session. `POST /v2/dropbox/connections` accepts a JSON object
+with only `accessToken`, or the C++ driver's equivalent credential fields
+`appKey`, `appSecret` and `refreshToken` (all three required, no other fields).
+Existing access-token records remain compatible. Refresh credentials are sealed
+in D1 and exchanged at Dropbox's fixed OAuth endpoint when needed. This does not
+implement the OAuth consent flow: obtaining these credentials remains a manual
+test step unless the separately gated OAuth flow below is configured. There is no access-token cache, so each operation incurs a refresh
+request and Dropbox's associated latency/quota. `GET` lists the authenticated owner's connections;
+`DELETE /v2/dropbox/connections?id=...` deletes the local record. The bearer
+session is required for each request. `GET /v2/dropbox/files?connection=...`
+and `GET /v2/dropbox/file?connection=...&path=...` use that owner's encrypted
+credential only. The cap is 50 connections per owner. Creation and deletion
+atomically check the live session. Deletion does not revoke the Dropbox grant
+or stop an in-flight request. Never send tokens in URLs, logs, issues or chat.
+
+A further disabled-by-default write experiment requires
+`KOVA_EXPERIMENTAL_DROPBOX_WRITES=enabled` in addition to the v2 flags.
+`PUT /v2/dropbox/file?connection=...&path=/folder/new-file` sends a raw body
+with a valid `Content-Length`, at most 8 MiB. It uses Dropbox `mode=add`,
+`autorename=false` and `strict_conflict=true`; a conflict returns 409 rather
+than silently replacing a file. The token needs Dropbox's `files.content.write`
+scope. The server counts bytes independently, checks the owner's session and
+connection again after receiving the body, and streams no client-controlled
+host or headers to Dropbox. A provider request already in flight cannot be
+rolled back on revocation or disconnect. A timeout or invalid provider response
+can occur **after Dropbox created the file**; check the folder before retrying.
+The write uses a shared folder's existing Dropbox permissions and does not
+implement Kova public/private sharing.
+
+The optional interactive Dropbox connection flow additionally requires
+`KOVA_EXPERIMENTAL_DROPBOX_OAUTH=enabled`, the D1 migration
+`0008_dropbox_oauth_pending.sql`, `DROPBOX_CLIENT_ID`, `DROPBOX_CLIENT_SECRET`,
+and `KOVA_DROPBOX_REDIRECT` set to the same-origin HTTPS URL ending in
+`/v2/dropbox/oauth/callback`, also registered with Dropbox. Start with
+`POST /v2/dropbox/oauth/start` using the owner's session. It requests read scopes
+and offline access with PKCE and a single-use state, bound to the initiating
+browser and live session. The callback stores encrypted refresh credentials.
+To request Dropbox write permission additionally, explicitly enable
+`KOVA_EXPERIMENTAL_DROPBOX_OAUTH_WRITE=enabled`; this is distinct from the
+server-side upload switch. A popup returns JSON on success; return to the UI and
+refresh. Starting a second flow in the same browser invalidates the first browser
+binding. The feature has mock and workerd/D1-emulator tests only, no real-provider
+validation, production rate limiting, grant revocation or secure provisioning UI.
+An exchanged grant can survive if local persistence fails; revoke at Dropbox.
+Never publish secrets or callback URLs containing codes.
+
+These endpoints use fixed Dropbox API hosts and never follow redirects. Dropbox
+access tokens expire; larger uploads, shares, rate limiting,
+UI upload and real-provider testing remain unimplemented. v1 is still a shared-token endpoint
+if separately enabled; v2 does not change its security model. Local tests use
+mock responses, not Dropbox. Revoke test credentials after use. Dropbox quotas
+and permissions apply. The operator controlling the Worker and vault key can
+read credentials: encryption is not end-to-end. Do not deploy this experiment
+with production or sensitive data.
 
 ## Access-control foundation (not integrated)
 
@@ -114,8 +212,8 @@ primitives: 256-bit random tokens, token hashes in D1, fixed expiry (at most
 local workerd/D1 emulator; they do not verify production D1. The opt-in `/v2`
 experiment validates and revokes sessions; the separately disabled Google
 login prototype can issue sessions for pre-provisioned identities. `issueSession`
-must only be called after a trusted authentication flow verifies identity. There is no password authentication, login UI, reset,
-2FA, CSRF policy, session cookie handling, brute-force protection, multi-user
+must only be called after a trusted authentication flow verifies identity. There is no password authentication, production-ready login UI, reset,
+2FA, comprehensive CSRF/security review, brute-force protection, multi-user
 provider authorization or operational key recovery. Disabling an account must
 also permanently revoke its sessions, preferably atomically; otherwise enabling
 it again reactivates unexpired sessions. An isolated, unexposed `disableUser`
@@ -145,7 +243,7 @@ workerd/D1 emulation. They do not constitute a security review or test real D1.
 An isolated `/v2/google-drive/` experiment uses this vault and session
 primitives for owner-only listing and downloads; it is disabled unless
 `KOVA_EXPERIMENTAL_V2=enabled`. It has no production-ready login or
-connection provisioning and is not integrated into the Kova UI. The older `/v1` prototype still uses one
+connection provisioning and is available through a separate experimental Cloudflare UI. The older `/v1` prototype still uses one
 account-level bearer secret and must not be treated as multi-user.
 Key provisioning, key versioning/rotation, safe backup/recovery, audit, OAuth
 consent/revocation, deletion semantics at Google and grant-based sharing are not
@@ -171,7 +269,7 @@ with mock Google responses and local workerd/D1 emulation only.
 
 **Do not enable or deploy for users:** there is no production-ready login,
 account provisioning, consent UI, provider-side credential revocation, D1 migration
-deployment, durable throttling or UI, and no real provider test. It does not implement
+deployment, durable throttling or production-ready UI, and no real provider test. It does not implement
 roles, resource sharing or Kova API compatibility. The test harness seeds users,
 sessions and connections directly and is not part of the Worker. The v1 shared
 bearer routes remain separate and would bypass these owner checks if enabled.
@@ -181,10 +279,12 @@ bearer routes remain separate and would bypass these owner checks if enabled.
 
 An opt-in `/v2/google-drive/oauth/start` and callback prototype requests the
 Google Drive read-only scope using PKCE, a random single-use state, an encrypted
-short-lived verifier and a live initiating session. It stores the refresh token
-in the experimental owner-scoped vault. OAuth requires both experimental flags
-and a configured fixed HTTPS callback URI; the actual application has no login
-or connection UI. The separate login prototype is disabled by default. The flow has mock and
+short-lived verifier, initiating browser cookie and a live initiating session.
+Migration `0009_google_oauth_browser_binding.sql` is required and invalidates
+pending attempts created before migration. Starting a second Google connection
+flow in the same browser invalidates the first browser binding. It stores the
+refresh token in the experimental owner-scoped vault. OAuth requires both experimental flags
+and a configured fixed HTTPS callback URI; the separate experimental UI can start this flow but is not production-ready. The separate login prototype is disabled by default. The flow has mock and
 local D1/workerd tests only and has not been verified with Google or deployed
 Cloudflare resources. **Do not enable it for users or sensitive data.**
 
@@ -206,11 +306,15 @@ Google OIDC, PKCE, a single-use D1 state, a Secure HttpOnly SameSite=Lax
 browser-binding cookie, and RS256 verification using Google's fixed JWKS
 endpoint. It validates issuer, audience, nonce and token times. Only Google
 subjects pre-provisioned in `external_identities` map to enabled users; email
-is not an identifier. On success it returns a one-hour bearer session as JSON.
+is not an identifier. By default it returns a one-hour bearer session as JSON.
+When `KOVA_EXPERIMENTAL_BROWSER_AUTH=enabled`, it instead sets a one-hour
+HttpOnly, Secure, SameSite=Lax host-only session cookie and redirects to `/`;
+state-changing requests using this cookie require a matching HTTPS Origin.
+Sign-out revokes the session and clears the cookie. This is still experimental.
 The workerd test uses synthetic users, generated signing keys and mock Google
 responses; no Google account, Cloudflare deployment or browser was tested.
 
-This is not ready for users: no onboarding/provisioning UI, browser login UI,
+This is not ready for users: no onboarding/provisioning UI, production-ready browser login UI,
 durable rate limiting, account recovery, audit, session security policy, consent
 handling or real provider validation exists. Anyone can fill the prototype's
 global pending-attempt cap, causing denial of service. Removing an identity does

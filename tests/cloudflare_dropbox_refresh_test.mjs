@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {readFile} from 'node:fs/promises';
+import {handleRequest} from '../deploy/cloudflare-native/src/index.js';
+import {issueSession,hashSessionToken} from '../deploy/cloudflare-native/src/sessions.js';
+const sqlite=new DatabaseSync(':memory:');
+for(const name of ['0001_access_foundation.sql','0002_sessions.sql','0007_dropbox_connections.sql'])sqlite.exec(await readFile(new URL('../deploy/cloudflare-native/migrations/'+name,import.meta.url),'utf8'));
+sqlite.exec("INSERT INTO users(id,username) VALUES('alice','alice'),('bob','bob')");
+const db={prepare(sql){return{bind(...v){return{async first(){return sqlite.prepare(sql).get(...v)??null},async all(){return{results:sqlite.prepare(sql).all(...v)}},async run(){return{meta:{changes:Number(sqlite.prepare(sql).run(...v).changes)}}}}}}}};
+const env={DB:db,KOVA_CREDENTIAL_KEY:Buffer.alloc(32,2).toString('base64url'),KOVA_EXPERIMENTAL_V2:'enabled',KOVA_EXPERIMENTAL_DROPBOX_V2:'enabled'};
+const alice=await issueSession(db,'alice',Math.floor(Date.now()/1000)+600),bob=await issueSession(db,'bob',Math.floor(Date.now()/1000)+600);
+const req=(who,path,body)=>new Request('https://worker.test'+path,{method:body?'POST':'GET',headers:{authorization:'Bearer '+who,...(body?{'content-type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
+const original=globalThis.fetch, calls=[];let mode='ok';
+const aliceHash=await hashSessionToken(alice);
+globalThis.fetch=async(url,options)=>{calls.push({url:String(url),options});if(String(url)==='https://api.dropboxapi.com/oauth2/token'){if(mode==='revoke')sqlite.prepare('UPDATE sessions SET revoked_at=? WHERE token_hash=?').run(Math.floor(Date.now()/1000),aliceHash);if(mode==='redirect')return new Response(null,{status:302,headers:{location:'https://evil.test'}});if(mode==='bad')return Response.json({access_token:'bad\ntoken'});return Response.json({access_token:'fresh-access',expires_in:14400});}assert.equal(options.headers.authorization,'Bearer fresh-access');return Response.json({entries:[],cursor:'c',has_more:false});};
+try {
+  const body={appKey:'app-key',appSecret:'app-secret',refreshToken:'refresh-secret'};
+  assert.equal((await handleRequest(req(alice,'/v2/dropbox/connections',{...body,accessToken:'extra'}),env)).status,400);
+  const created=await handleRequest(req(alice,'/v2/dropbox/connections',body),env);assert.equal(created.status,201);
+  const {id}=await created.json();const row=sqlite.prepare('SELECT * FROM dropbox_connections WHERE id=?').get(id);
+  for(const secret of Object.values(body))assert.ok(!JSON.stringify(row).includes(secret));
+  assert.equal((await handleRequest(req(bob,'/v2/dropbox/files?connection='+id),env)).status,404);assert.equal(calls.length,0);
+  assert.equal((await handleRequest(req(alice,'/v2/dropbox/files?connection='+id+'&path=%2F..%2Fx'),env)).status,400);
+  assert.equal(calls.length,0,'invalid requests must not refresh credentials');
+  assert.equal((await handleRequest(req(alice,'/v2/dropbox/files?connection='+id),env)).status,200);
+  assert.equal(calls[0].url,'https://api.dropboxapi.com/oauth2/token');assert.equal(calls[0].options.redirect,'manual');
+  assert.equal(calls[0].options.body.get('grant_type'),'refresh_token');assert.equal(calls[0].options.body.get('client_id'),'app-key');assert.equal(calls[0].options.body.get('client_secret'),'app-secret');assert.equal(calls[0].options.body.get('refresh_token'),'refresh-secret');
+  mode='redirect';const before=calls.length;let failed=await handleRequest(req(alice,'/v2/dropbox/files?connection='+id),env);assert.equal(failed.status,502);assert.equal(calls.length,before+1);assert.equal(failed.headers.get('location'),null);assert.ok(!(await failed.text()).includes('refresh-secret'));
+  mode='bad';failed=await handleRequest(req(alice,'/v2/dropbox/files?connection='+id),env);assert.equal(failed.status,502);
+  mode='revoke';const prior=calls.length;
+  const upload=new Request('https://worker.test/v2/dropbox/file?connection='+id+'&path=%2Fa',{method:'PUT',headers:{authorization:'Bearer '+alice,'content-length':'3'},body:'abc'});
+  assert.equal((await handleRequest(upload,{...env,KOVA_EXPERIMENTAL_DROPBOX_WRITES:'enabled'})).status,401);
+  assert.equal(calls.length,prior+1,'revocation while refreshing must prevent upload');
+  console.log('Experimental Dropbox refresh credential tests passed');
+}finally{globalThis.fetch=original;sqlite.close();}

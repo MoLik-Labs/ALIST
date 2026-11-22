@@ -12,17 +12,17 @@ SQLite trên một ổ đĩa dành cho **một instance**. Nhiều replica độ
 
 ## Docker Compose
 
-Trên máy Linux đã cài Docker và Compose:
+Trên máy Linux đã cài Docker và Compose, thay `YOUR_GITHUB_CLONE_URL` bằng URL HTTPS clone của **fork của bạn** (GitHub → repo của bạn → Code):
 
 ```sh
-git clone https://github.com/MoLik-Labs/Kova-INC.git
-cd Kova-INC
+git clone YOUR_GITHUB_CLONE_URL kova
+cd kova
 docker compose up -d --build
 ```
 
 Mở `http://localhost:5244` trên máy chạy Kova. Xem mật khẩu được tạo trong log đã bảo vệ, hoặc đặt `ALIST_ADMIN_PASSWORD` đủ mạnh trước lần khởi tạo đầu tiên. Không chia sẻ log chứa mật khẩu. `./data` chứa SQLite, khóa và cấu hình; hãy sao lưu. Bảo vệ truy cập mạng và dùng HTTPS trước khi công khai.
 
-Với Railway, Fly.io và nền tảng khác, xem [hướng dẫn nền tảng](https://github.com/MoLik-Labs/Kova-INC/blob/BETA/docs/platform-deployment.md). Không phải mọi luồng cloud đã được thử trên tài khoản thực.
+Với Railway, Fly.io và nền tảng khác, xem `docs/platform-deployment.md` trong repository và nhánh bạn chọn. Không phải mọi luồng cloud đã được thử trên tài khoản thực.
 
 ## Render Free: thử từ public repo, không cần Blueprint
 

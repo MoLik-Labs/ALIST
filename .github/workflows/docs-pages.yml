@@ -32,6 +32,7 @@ jobs:
       - run: npm run docs:build
         env:
           DOCS_BASE: ${{ vars.DOCS_BASE }}
+          DOCS_REPOSITORY: ${{ vars.DOCS_REPOSITORY }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs/guide/.vitepress/dist

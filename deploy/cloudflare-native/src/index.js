@@ -1,6 +1,9 @@
 // Experimental standalone Cloudflare-native R2 API. This is NOT the Kova
 // API or a production-ready server. Do not attach production data.
 import { googleDriveRequest } from './google-drive.js';
+import { dropboxRequest } from './dropbox.js';
+import { connectedDropboxRequest } from './connected-dropbox.js';
+import { dropboxOauthRequest } from './dropbox-oauth.js';
 import { connectedDriveRequest } from './connected-drive.js';
 import { googleOauthRequest } from './google-oauth.js';
 import { googleLoginRequest } from './google-login.js';
@@ -32,9 +35,24 @@ function safeText(value, max) {
 
 export async function handleRequest(request, env) {
   const url = new URL(request.url);
+  // Static UI is deliberately opt-in through a separately bound asset set.
+  // API routes never fall through to assets and unknown files stay private.
+  if ((request.method === 'GET' || request.method === 'HEAD') && env?.ASSETS && ['/', '/app.css', '/app.js'].includes(url.pathname)) {
+    try {
+      const asset = await env.ASSETS.fetch(request);
+      const headers = new Headers(asset.headers);
+      headers.set('content-security-policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'");
+      headers.set('x-content-type-options', 'nosniff');
+      headers.set('referrer-policy', 'no-referrer');
+      headers.set('cache-control', 'no-store');
+      return new Response(asset.body, {status: asset.status, headers});
+    } catch { return json(503, {error:'UI unavailable'}); }
+  }
   if (request.method === 'GET' && url.pathname === '/ping') return json(200, { ok: true, experimental: true });
   if (url.pathname.startsWith('/v2/auth/google/')) return googleLoginRequest(request, env);
   if (url.pathname.startsWith('/v2/google-drive/oauth/')) return googleOauthRequest(request, env);
+  if (url.pathname.startsWith('/v2/dropbox/oauth/')) return dropboxOauthRequest(request, env);
+  if (url.pathname.startsWith('/v2/dropbox/')) return connectedDropboxRequest(request, env);
   if (url.pathname.startsWith('/v2/')) return connectedDriveRequest(request, env);
   if (typeof env?.KOVA_NATIVE_TOKEN !== 'string' || env.KOVA_NATIVE_TOKEN.length < 32 || env.KOVA_NATIVE_TOKEN.length > 1024) {
     return json(503, { error: 'Experimental backend is not configured' });
@@ -44,6 +62,10 @@ export async function handleRequest(request, env) {
   if (url.pathname.startsWith('/v1/google-drive/')) {
     if (request.method !== 'GET') return json(405, { error: 'Method not allowed' });
     return googleDriveRequest(url, env, request.headers);
+  }
+  if (url.pathname.startsWith('/v1/dropbox/')) {
+    if (request.method !== 'GET') return json(405, { error: 'Method not allowed' });
+    return dropboxRequest(url, env);
   }
   if (!env.R2) return json(503, { error: 'R2 is not configured' });
   try {
