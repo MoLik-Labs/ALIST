@@ -40,6 +40,10 @@ requires that origin. Deploying `web` as static files alone cannot provide the
 server or data. See the [platform deployment guide](docs/platform-deployment.md) for Railway,
 Fly.io, Heroku, persistence, backup, scaling and first-start instructions.
 
+## Monitoring and backups
+
+The admin overview offers an on-demand `/ping` check. An **optional separate** experimental Cloudflare Worker can sample one Render service and show a public status page; see the [monitor and backup guide](docs/guide/monitor-backup.md) or [hướng dẫn tiếng Việt](docs/guide/vi/monitor-backup.md). A ping cannot guarantee availability or preserve Render Free's ephemeral files. Kova does not yet have verified automatic backup/restore or confirmed NodeWarden integration; do not use it as your only backup.
+
 ## Build and run
 
 ### Requirements

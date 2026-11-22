@@ -1144,6 +1144,75 @@ void test_live_http_api_webdav_and_concurrency() {
         "GET /dav/local/dav_folder/note.txt HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + basic_admin + "\r\nConnection: close\r\n\r\n");
     CHECK(dav_get.status == 200 && dav_get.body == dav_payload);
 
+    // NodeWarden-shaped WebDAV backup flow using dummy data, not a vault.
+    auto dav_repeat = raw_http_call(port,
+        "MKCOL /dav/local/dav_folder HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + basic_admin + "\r\nConnection: close\r\n\r\n");
+    CHECK(dav_repeat.status == 405 || dav_repeat.status == 201);
+    auto dav_nested = raw_http_call(port,
+        "MKCOL /dav/local/dav_folder/attachments HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + basic_admin + "\r\nConnection: close\r\n\r\n");
+    CHECK(dav_nested.status == 201);
+    auto backup_put = raw_http_call(port,
+        "PUT /dav/local/dav_folder/attachments/test.zip HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + basic_admin +
+        "\r\nContent-Type: application/zip\r\nContent-Length: " + std::to_string(dav_payload.size()) + "\r\nConnection: close\r\n\r\n" + dav_payload);
+    CHECK(backup_put.status >= 200 && backup_put.status < 300);
+    auto backup_head = raw_http_call(port,
+        "HEAD /dav/local/dav_folder/attachments/test.zip HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + basic_admin + "\r\nConnection: close\r\n\r\n");
+    CHECK(backup_head.status == 200 && backup_head.body.empty());
+    CHECK(backup_head.headers["content-length"] == std::to_string(dav_payload.size()));
+    auto backup_list = raw_http_call(port,
+        "PROPFIND /dav/local/dav_folder/attachments HTTP/1.1\r\nHost: 127.0.0.1\r\nDepth: 1\r\nAuthorization: " + basic_admin + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+    CHECK(backup_list.status == 207 && backup_list.body.find("test.zip") != std::string::npos);
+    auto backup_get = raw_http_call(port,
+        "GET /dav/local/dav_folder/attachments/test.zip HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + basic_admin + "\r\nConnection: close\r\n\r\n");
+    CHECK(backup_get.status == 200 && backup_get.body == dav_payload);
+    auto backup_delete = raw_http_call(port,
+        "DELETE /dav/local/dav_folder/attachments/test.zip HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + basic_admin + "\r\nConnection: close\r\n\r\n");
+    CHECK(backup_delete.status == 204);
+    auto backup_missing = raw_http_call(port,
+        "HEAD /dav/local/dav_folder/attachments/test.zip HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + basic_admin + "\r\nConnection: close\r\n\r\n");
+    CHECK(backup_missing.status == 404);
+
+    // WebDAV management must not bypass a protected path's metadata password.
+    CHECK(raw_http_call(port, "MKCOL /dav/local/dav_folder/protected HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + basic_admin + "\r\nConnection: close\r\n\r\n").status == 201);
+    RoleRecord dav_role;
+    dav_role.name = "dav-backup-test";
+    dav_role.scopes = {{.path = "/local/dav_folder", .permission = (1 << PermWebdavRead) | (1 << PermWebdavManage)}};
+    auto dav_role_id = db.create_role(dav_role);
+    CHECK(dav_role_id > 0);
+    UserRecord dav_user;
+    dav_user.username = "dav-test";
+    dav_user.password_hash = hash_password_pbkdf2("SecureDavTestPassword!");
+    dav_user.base_path = "/local/dav_folder";
+    dav_user.role_ids = {dav_role_id};
+    CHECK(db.create_user(dav_user) > 0);
+    MetaRecord protected_meta;
+    protected_meta.path = "/local/dav_folder/protected";
+    protected_meta.password = "metadata-secret";
+    protected_meta.p_sub = true;
+    CHECK(db.create_meta(protected_meta) > 0);
+    const auto dav_basic = "Basic " + base64_encode("dav-test:SecureDavTestPassword!");
+    auto protected_put = [&](std::string_view password_header) {
+        return raw_http_call(port, "PUT /dav/protected/item.txt HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + dav_basic +
+            "\r\n" + std::string(password_header) + "Content-Length: 3\r\nConnection: close\r\n\r\nabc");
+    };
+    CHECK(protected_put("").status == 403);
+    CHECK(!std::filesystem::exists(dir + "/storage/dav_folder/protected/item.txt"));
+    auto allowed_protected = protected_put("Password: metadata-secret\r\n");
+    CHECK(allowed_protected.status == 201);
+    auto protected_copy = raw_http_call(port,
+        "COPY /dav/note.txt HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + dav_basic +
+        "\r\nDestination: /dav/protected/other.txt\r\nConnection: close\r\n\r\n");
+    CHECK(protected_copy.status == 403);
+    auto allowed_copy = raw_http_call(port,
+        "COPY /dav/note.txt HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + dav_basic +
+        "\r\nPassword: metadata-secret\r\nDestination: /dav/protected/note.txt\r\nConnection: close\r\n\r\n");
+    CHECK(allowed_copy.status == 201);
+    CHECK(std::filesystem::exists(dir + "/storage/dav_folder/protected/note.txt"));
+    auto protected_delete = raw_http_call(port,
+        "DELETE /dav/protected/item.txt HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + dav_basic + "\r\nConnection: close\r\n\r\n");
+    CHECK(protected_delete.status == 403);
+    CHECK(std::filesystem::exists(dir + "/storage/dav_folder/protected/item.txt"));
+
     // I. Multi-Threaded Concurrency Hammer (12 threads x 25 requests = 300 concurrent ops)
     raw_http_call(port, "POST /api/admin/index/build HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + admin_jwt + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
 

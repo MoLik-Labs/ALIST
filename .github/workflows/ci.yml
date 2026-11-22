@@ -78,6 +78,9 @@ jobs:
           npm run test:cf-identity
           npm run test:cf-login
 
+      - name: Test isolated uptime monitor
+        run: node tests/uptime_monitor_test.mjs
+
       - name: Check native platform deployment configuration
         run: |
           python3 tests/platform_config_smoke.py

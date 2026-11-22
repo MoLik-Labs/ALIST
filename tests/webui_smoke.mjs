@@ -71,6 +71,7 @@ function createHarness({ path = '/', role = 2, items = [], backendDown = false }
     calls.push({ path: url.pathname, query: url.searchParams, method: options.method || 'GET', body, headers: options.headers || {} });
     const pathName = url.pathname;
     if (backendDown) throw new Error('network unavailable');
+    if (pathName === '/ping') return response(null, { contentType: 'text/plain', text: 'pong' });
     if (pathName === '/api/public/settings') return response({ app_name: 'Kova', site_title: 'Kova', version: 'v4.2.0', guest_enabled: true });
     if (pathName === '/api/me') return response(user);
     if (pathName === '/api/fs/list') return response({ content: files.map(item => ({ ...item })), total: files.length, write: role === 2, provider: 'Local', readme: '# Workspace' });
@@ -176,6 +177,9 @@ async function testExplorerAndAdmin() {
 
   document.getElementById('btnTopAdmin').click();
   await eventually(() => !document.getElementById('adminView').hidden, 'Admin view did not open');
+  await eventually(() => document.querySelector('[data-act="ping-now"]'), 'Liveness action did not render');
+  document.querySelector('[data-act="ping-now"]').click();
+  await eventually(() => document.getElementById('pingStatus')?.textContent.includes('responded'), 'Liveness check did not show result');
   for (const tab of ['overview', 'storages', 'users', 'roles', 'metas', 'shares', 'tasks', 'settings']) {
     document.querySelector(`[data-tab="${tab}"]`).click();
     await eventually(() => document.querySelector(`[data-tab="${tab}"]`).getAttribute('aria-selected') === 'true', `Admin tab ${tab} did not activate`);

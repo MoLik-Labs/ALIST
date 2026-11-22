@@ -1,0 +1,16 @@
+# Copy to wrangler.local.toml. Use a NEW Worker and NEW KV namespace.
+name = "kova-uptime-monitor-test"
+main = "worker.mjs"
+compatibility_date = "2026-01-01"
+workers_dev = true
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+# Replace with your own Render origin only, no trailing slash or /ping.
+RENDER_ORIGIN = "REPLACE_WITH_HTTPS_RENDER_ORIGIN"
+
+[[kv_namespaces]]
+binding = "MONITOR_KV"
+id = "REPLACE_WITH_NEW_KV_NAMESPACE_ID"

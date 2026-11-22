@@ -320,7 +320,7 @@ userShares:'My shares',userTasks:'My tasks',noSessions:'No active sessions.',noS
 current:'Current',revoke:'Revoke',logOut:'Sign out',sessionExpired:'Session expired. Please sign in again.',
 fileDetails:'File details',path:'Path',provider:'Storage',type:'Type',creator:'Created by',views:'Views',downloads:'Downloads',
 expires:'Expires',protected:'Password protected',publicShare:'Public share',expired:'Expired',
-telemetry:'Live system telemetry',pause:'Pause updates',resume:'Resume updates',refreshNow:'Refresh now',
+pingCheck:'Check server now',pingReady:'Checks /ping from this browser only; this is not historical uptime or a storage test.',pingPending:'Checking server…',pingOk:'Server responded to /ping.',pingFailed:'Server did not respond correctly to /ping.',telemetry:'Live system telemetry',pause:'Pause updates',resume:'Resume updates',refreshNow:'Refresh now',
 uptime:'Uptime',memory:'Memory',peakMemory:'Peak memory',threads:'Threads',cpuCores:'CPU cores',
 activeConnections:'Active connections',totalRequests:'Total requests',sent:'Bytes sent',received:'Bytes received',
 mounted:'Mounted storages',database:'Database size',cache:'VFS cache',cacheHits:'Cache hits',cacheMisses:'Cache misses',
@@ -401,7 +401,7 @@ authenticatorHint:'Thêm khóa này vào ứng dụng xác thực, sau đó nh�
 currentSession:'Phiên hiện tại',userShares:'Liên kết của tôi',userTasks:'Tác vụ của tôi',noSessions:'Không có phiên đang hoạt động.',noShares:'Chưa có liên kết chia sẻ.',
 noTasks:'Chưa có tác vụ.',current:'Hiện tại',revoke:'Thu hồi',logOut:'Đăng xuất',sessionExpired:'Phiên đã hết hạn. Vui lòng đăng nhập lại.',
 fileDetails:'Thông tin tệp',path:'Đường dẫn',provider:'Kho lưu trữ',type:'Loại',creator:'Người tạo',views:'Lượt xem',downloads:'Lượt tải',expires:'Hết hạn',protected:'Có mật khẩu',
-publicShare:'Chia sẻ công khai',expired:'Đã hết hạn',telemetry:'Theo dõi hệ thống trực tiếp',pause:'Tạm dừng cập nhật',resume:'Tiếp tục cập nhật',refreshNow:'Làm mới',
+publicShare:'Chia sẻ công khai',expired:'Đã hết hạn',pingCheck:'Kiểm tra máy chủ',pingReady:'Chỉ kiểm tra /ping từ trình duyệt này; không phải lịch sử uptime hay kiểm tra kho lưu trữ.',pingPending:'Đang kiểm tra máy chủ…',pingOk:'Máy chủ đã trả lời /ping.',pingFailed:'Máy chủ không trả lời /ping đúng cách.',telemetry:'Theo dõi hệ thống trực tiếp',pause:'Tạm dừng cập nhật',resume:'Tiếp tục cập nhật',refreshNow:'Làm mới',
 uptime:'Thời gian hoạt động',memory:'Bộ nhớ',peakMemory:'Bộ nhớ đỉnh',threads:'Luồng',cpuCores:'Lõi CPU',activeConnections:'Kết nối hiện tại',
 totalRequests:'Tổng yêu cầu',sent:'Đã gửi',received:'Đã nhận',mounted:'Kho đã gắn',database:'Dung lượng cơ sở dữ liệu',cache:'Bộ nhớ đệm VFS',cacheHits:'Lượt trúng bộ đệm',
 cacheMisses:'Lượt trượt bộ đệm',indexed:'Tệp đã lập chỉ mục',activeTasks:'Tác vụ đang chạy',completedTasks:'Tác vụ hoàn tất',telemetryUnavailable:'Chưa có dữ liệu theo dõi.',
@@ -1608,7 +1608,7 @@ panel.innerHTML=`${panelToolbar(t('telemetry'),actions)}<div class="stats-grid">
       ${statCard(t('cache'),stats.vfs_cache_entries,`${t('cacheHits')}: ${stats.vfs_cache_hits} · ${t('cacheMisses')}: ${stats.vfs_cache_misses}`)}
       ${statCard(t('indexed'),Number(stats.fts_indexed_files||0).toLocaleString(),`${t('activeTasks')}: ${stats.tasks_undone} · ${t('completedTasks')}: ${stats.tasks_done}`)}
       ${statCard(APP,stats.version,stats.engine||'')}
-      </div><p class="field-help" aria-live="polite">${esc(t('telemetryUnavailable'))}</p>`;
+      </div><div class="panel-toolbar"><button type="button" class="btn" data-act="ping-now">${esc(t('pingCheck'))}</button><p class="field-help" id="pingStatus" role="status">${esc(t('pingReady'))}</p></div>`;
 if(!state.telemetryPaused)state.adminTimer=setInterval(async()=>{
 if(state.currentView!=='admin'||state.adminTab!=='overview'||state.telemetryPaused)return;
 try{
@@ -1921,6 +1921,20 @@ try{await api('/api/me/sessions/evict',{body:{device_key:element.dataset.key}});
 catch(error){toast(error.message,'err');}
 }else if(action==='copy-share-link')await copyShareLink(id);
 else if(action==='admin-tab')selectAdminTab(element.dataset.tab);
+else if(action==='ping-now'){
+const status=$('pingStatus');
+if(!status)return;
+status.textContent=t('pingPending');
+element.disabled=true;
+const controller=new AbortController();
+const timeout=setTimeout(()=>controller.abort(),10000);
+try{
+const response=await fetch('/ping',{cache:'no-store',signal:controller.signal});
+const body=await response.text();
+status.textContent=response.ok&&body==='pong'?t('pingOk'):t('pingFailed');
+}catch{status.textContent=t('pingFailed');}
+finally{clearTimeout(timeout);element.disabled=false;}
+}
 else if(action==='telemetry-toggle'){state.telemetryPaused=!state.telemetryPaused;await loadAdminPanel();}
 else if(action.startsWith('storage-')||action.startsWith('user-')||action.startsWith('role-')||action.startsWith('meta-')){
 if(action==='user-delete'||action==='role-delete'||action==='meta-delete')askAdminDelete(action.split('-')[0],id);
