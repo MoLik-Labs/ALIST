@@ -9,6 +9,23 @@ const validId = id => typeof id === 'string' && ID.test(id);
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 const hex = bytes => [...new Uint8Array(bytes)].map(b => b.toString(16).padStart(2, '0')).join('');
 const hashToken = async token => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)));
+const SESSION_COOKIE = '__Host-kova_session';
+export const browserSessionCookie = (value, maxAge) => `${SESSION_COOKIE}=${value}; Path=/; Max-Age=${maxAge}; Secure; HttpOnly; SameSite=Lax`;
+// Explicit bearer credentials take precedence; never fall back to a cookie if
+// an Authorization header was supplied but malformed. Cookie mutations require
+// a same-origin Origin header, including in clients that ignore SameSite.
+export function sessionFromRequest(request, env) {
+  const auth = request.headers.get('authorization');
+  if (auth !== null) return /^Bearer ([A-Za-z0-9_-]{43})$/.exec(auth)?.[1] || null;
+  if (env?.KOVA_EXPERIMENTAL_BROWSER_AUTH !== 'enabled') return null;
+  const url = new URL(request.url);
+  if (url.protocol !== 'https:') return null;
+  if (!['GET', 'HEAD'].includes(request.method) && request.headers.get('origin') !== url.origin) return null;
+  const cookies = (request.headers.get('cookie') || '').split(';').map(s => s.trim()).filter(s => s.startsWith(`${SESSION_COOKIE}=`));
+  if (cookies.length !== 1) return null;
+  const value = cookies[0].slice(SESSION_COOKIE.length + 1);
+  return TOKEN.test(value) ? value : null;
+}
 // For guarded D1 mutations after session authentication. Never expose hashes.
 export async function hashSessionToken(token) {
   if (typeof token !== 'string' || !TOKEN.test(token)) return null;

@@ -1,0 +1,23 @@
+# EXAMPLE ONLY: copy to wrangler.isolated.toml, then replace all placeholders.
+# Choose a NEW Worker name; deployment replaces code on any Worker with that name.
+# Never use this file to deploy kova-inc or connect real/sensitive data.
+name = "REPLACE_WITH_NEW_TEST_WORKER_NAME"
+main = "src/index.js"
+compatibility_date = "2026-11-16"
+workers_dev = true
+
+[assets]
+directory = "ui"
+binding = "ASSETS"
+run_worker_first = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "REPLACE_WITH_TEST_DATABASE_NAME"
+database_id = "REPLACE_WITH_TEST_DATABASE_ID"
+migrations_dir = "migrations"
+
+# No experimental login, provider, upload, or shared-bearer flags are enabled.
+# This initial deployment can show the interface and /ping only. Do not put
+# credentials, secret keys, OAuth tokens or passwords in this file.
+# No R2 binding is required to test the interface and D1 setup.

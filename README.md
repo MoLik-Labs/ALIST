@@ -22,8 +22,10 @@ The bilingual documentation website is built with [VitePress](https://github.com
 
 ## Quick deployment
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2FMoLik-Labs%2FKova-INC)
-[![Deploy Cloudflare edge proxy](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FMoLik-Labs%2FKova-INC%2Ftree%2FBETA%2Fdeploy%2Fcloudflare-worker)
+**Fork owners:** the following buttons point to the upstream repository, not your fork. Do not use them to deploy your fork; select your own repository and branch in the provider dashboard instead.
+
+[![Deploy upstream to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2FMoLik-Labs%2FKova-INC)
+[![Deploy upstream Cloudflare edge proxy](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FMoLik-Labs%2FKova-INC%2Ftree%2FBETA%2Fdeploy%2Fcloudflare-worker)
 
 Cloudflare's button requires a public repository, and Render users need access
 to the repository. Buttons use `BETA`,

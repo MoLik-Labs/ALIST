@@ -13,7 +13,7 @@ The current Worker and Pages projects forward requests to a Kova server you host
 
 ## Pages proxy
 
-Create a Pages project linked to your repository and branch. Set root directory to `deploy/cloudflare-pages`, build command to `exit 0`, and output directory to `public`. Set the Pages runtime secret `KOVA_ORIGIN` as above, then redeploy. See the [Pages guide](https://github.com/MoLik-Labs/Kova-INC/tree/BETA/deploy/cloudflare-pages) for full details. Pages Git integration and deployment require verification on your account.
+Create a Pages project linked to your repository and branch. Set root directory to `deploy/cloudflare-pages`, build command to `exit 0`, and output directory to `public`. Set the Pages runtime secret `KOVA_ORIGIN` as above, then redeploy. See the `deploy/cloudflare-pages/README.md` in your repository and branch for full details. Pages Git integration and deployment require verification on your account.
 
 ## Unstyled page or inactive buttons?
 
@@ -32,3 +32,9 @@ If previews are needed, first identify the intended Worker and build root direct
 ## Free-tier limits
 
 The [official Workers limits](https://developers.cloudflare.com/workers/platform/limits/) include request and CPU allowances for the Free plan; reaching a limit can stop requests. D1, R2 and Google Drive have separate quotas. Unlimited free usage cannot be guaranteed. Check current limits and protect data before creating resources. The Cloudflare-native backend in this repository remains experimental and has not been verified on live services.
+
+## Static-only Worker and wrong build branch
+
+If Settings says runtime variables/bindings cannot be added because the Worker has only static assets, its current deployment has no backend. For example, production branch `BETA`, root `/`, and `npx wrangler deploy` do not automatically select the Cloudflare backend under `deploy/cloudflare-native`. A root-level `npx wrangler preview` does not configure a preview automatically either.
+
+To avoid further accidental deployments while the backend is being prepared, in **Settings → Builds** enable **Disable builds** for Production and disable **Builds for Preview branches** on the preview tab. Do not delete the Worker or replace the preview command with `wrangler deploy`. These changes only stop new builds; they do not repair the current deployment. Create a separate test Worker with isolated D1/R2 and secrets before testing the backend. Code may still be in a PR or another branch, so verify the branch actually contains the commit. Do not deploy the local `wrangler.local.toml` to production.

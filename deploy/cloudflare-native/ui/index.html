@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Kova Cloudflare experimental workspace">
+  <title>Kova · Cloud workspace</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="topbar">
+  <a href="/" class="brand" aria-label="Kova"><span class="brand-icon">K</span><span>Kova <small>Cloud</small></span></a>
+  <span class="top-context" data-i18n="workspace">Không gian lưu trữ</span>
+  <div class="top-actions"><button class="language" id="language" type="button" aria-label="Switch language">EN</button><span class="status"><span></span><span data-i18n="preview">BẢN THỬ NGHIỆM</span></span></div>
+</header>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-heading" data-i18n="navigation">KHÔNG GIAN</div>
+    <a class="nav-item active" href="#main"><span class="nav-symbol">▦</span><span data-i18n="files">Tệp của tôi</span></a>
+    <a class="nav-item" href="#connections"><span class="nav-symbol">◈</span><span data-i18n="connections">Kết nối</span></a>
+    <a class="nav-item" href="#help"><span class="nav-symbol">↗</span><span data-i18n="guide">Hướng dẫn</span></a>
+    <div class="sidebar-bottom"><div class="sidebar-mark">K</div><div><strong>Kova Cloud</strong><small data-i18n="separate">Backend độc lập · thử nghiệm</small></div></div>
+  </aside>
+  <main id="main" tabindex="-1">
+    <div class="page-head"><div><div class="eyebrow" data-i18n="eyebrow">TỔNG QUAN / TỆP</div><h1 data-i18n="title">Tệp của tôi</h1><p class="intro" data-i18n="intro">Một nơi để xem các tệp từ những kết nối của bạn.</p></div><button id="refresh" class="button secondary" type="button" disabled><span aria-hidden="true">↻</span> <span data-i18n="refresh">Làm mới</span></button></div>
+    <div class="notice" role="note"><strong data-i18n="experimental">Bản thử nghiệm, chưa dành cho dữ liệu thật.</strong> <span data-i18n="notice">Chỉ dùng tài khoản và tệp thử nghiệm. Các tính năng chia sẻ, tải lên và nhiều driver chưa sẵn sàng.</span></div>
+    <div id="message" role="status" aria-live="polite" hidden></div>
+    <section id="signin" class="signin panel" aria-labelledby="signin-title">
+      <div class="signin-copy"><div class="section-label" data-i18n="getting">BẮT ĐẦU</div><h2 id="signin-title" data-i18n="signin">Kết nối phiên thử nghiệm</h2><p data-i18n="signinText">Đăng nhập thử nghiệm cần một tài khoản đã được quản trị viên cấp trước. Phiên chỉ được giữ trong bộ nhớ tab và mất khi tải lại trang.</p><button id="googleLogin" class="button primary" type="button" data-i18n="googleLogin">Đăng nhập với Google</button><p class="hint" data-i18n="loginHint">Bạn sẽ quay lại không gian sau khi đăng nhập. Tài khoản cần được cấp trước.</p></div>
+      <details class="session-form"><summary data-i18n="manualSession">Phiên thử nghiệm thủ công</summary><form id="sessionForm"><label for="session" data-i18n="session">Token phiên thử nghiệm</label><input id="session" type="password" autocomplete="off" spellcheck="false" required><p class="hint" data-i18n="sessionHint">Không phải mật khẩu Google. Không dán token vào chat hoặc URL.</p><button class="button secondary" type="submit" data-i18n="openWorkspace">Mở không gian</button></form></details>
+    </section>
+    <section id="workspace" hidden>
+      <div class="workspace-top"><div class="identity"><span class="avatar" id="avatar">K</span><span><small data-i18n="signedIn">ĐANG ĐĂNG NHẬP</small><strong id="userName"></strong></span></div><button id="logout" type="button" class="button quiet" data-i18n="logout">Đăng xuất</button></div>
+      <section id="connections" aria-labelledby="connections-title"><div class="section-head"><div><div class="section-label" data-i18n="sources">NGUỒN LƯU TRỮ</div><h2 id="connections-title" data-i18n="connections">Kết nối</h2><p data-i18n="connectionsHelp">Chọn một kết nối để duyệt tệp.</p></div><div class="connection-buttons"><button id="googleConnect" class="button secondary" type="button" data-i18n="googleConnect">Kết nối Google Drive</button><button id="dropboxConnect" class="button secondary" type="button" data-i18n="dropboxConnect">Kết nối Dropbox</button></div></div><div id="connectionList" class="connections"></div>
+      <details class="add-connection"><summary data-i18n="addDropbox">Thêm Dropbox bằng token thử nghiệm</summary><form id="dropboxForm"><p class="hint" data-i18n="dropboxHint">Dùng access token ngắn hạn của tài khoản thử nghiệm. OAuth và tự làm mới chưa được hỗ trợ.</p><label for="dropboxToken" data-i18n="dropboxToken">Dropbox access token</label><div class="form-row"><input id="dropboxToken" type="password" autocomplete="off" required><button class="button primary" type="submit" data-i18n="add">Thêm kết nối</button></div></form></details></section>
+      <section class="files-section" aria-labelledby="files-title"><div class="section-head files-head"><div><div class="section-label" data-i18n="browser">TRÌNH DUYỆT TỆP</div><h2 id="files-title" data-i18n="files">Tệp của tôi</h2><p id="location" data-i18n="selectSource">Chọn kết nối ở trên để bắt đầu.</p></div><div class="file-buttons"><button id="disconnect" class="button quiet" type="button" hidden data-i18n="disconnect">Xóa kết nối</button><button id="back" class="button secondary" type="button" hidden data-i18n="back">Thư mục trước</button></div></div><div class="table-wrap"><div class="table-head"><span data-i18n="name">TÊN</span><span data-i18n="type">LOẠI</span><span data-i18n="size">KÍCH THƯỚC</span><span></span></div><div id="fileList" class="file-list"><div class="empty"><div class="empty-icon">⌁</div><strong data-i18n="emptyTitle">Không gian của bạn, gọn gàng hơn.</strong><p data-i18n="emptyText">Chọn một kết nối để xem các thư mục và tệp.</p></div></div></div><button id="more" class="button secondary more" type="button" hidden data-i18n="more">Xem thêm</button></section>
+    </section>
+    <details id="help" class="help-panel"><summary data-i18n="helpTitle">Hướng dẫn sử dụng thử nghiệm</summary><p data-i18n="helpText">Đăng nhập bằng tài khoản được cấp trước, kết nối Google Drive hoặc Dropbox, rồi chọn kết nối để duyệt tệp. Sau khi hoàn tất cấp quyền ở cửa sổ mới, quay lại và làm mới. Việc xóa kết nối không thu hồi quyền tại nhà cung cấp. Xem tài liệu trong repository và nhánh Cloudflare của bạn để biết cách cấu hình và các giới hạn.</p></details>
+    <footer><span>Kova Cloud <span class="dot">·</span> <span data-i18n="footer">Được thiết kế cho những kết nối đơn giản hơn.</span></span></footer>
+  </main>
+</div>
+</body>
+</html>
