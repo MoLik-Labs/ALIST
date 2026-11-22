@@ -1,11 +1,13 @@
 # ==============================================================================
-# Stage 1: Native C++20 LTO Hardened Builder
+# Stage 1: Native C++20 builder and zero-CDN Web UI bundle
 # ==============================================================================
 FROM debian:bookworm-slim AS builder
+ARG BUILD_JOBS=2
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     make \
+    nodejs \
     ca-certificates \
     libsqlite3-dev \
     libcurl4-openssl-dev \
@@ -18,19 +20,25 @@ COPY include ./include
 COPY third_party ./third_party
 COPY src ./src
 COPY tests ./tests
+COPY web ./web
+COPY scripts ./scripts
 COPY Makefile ./
 
-RUN make -j"$(nproc)" release && make -j"$(nproc)" test
+RUN node scripts/build_webui.mjs && \
+    make -j"${BUILD_JOBS}" release && \
+    make -j"${BUILD_JOBS}" test
 
 # ==============================================================================
-# Stage 2: Minimal Hardened Runtime Container
+# Stage 2: Minimal hardened runtime container
 # ==============================================================================
 FROM debian:bookworm-slim
 
-LABEL org.opencontainers.image.title="AList @nggkhaiz" \
-      org.opencontainers.image.authors="@nggkhaiz" \
-      org.opencontainers.image.source="https://github.com/NggKhaiz/ALIST" \
-      org.opencontainers.image.version="v4.1.0-nggkhaiz"
+LABEL org.opencontainers.image.title="Kova" \
+      org.opencontainers.image.description="Kova Native C++20 Multi-Storage Workspace" \
+      org.opencontainers.image.authors="MoLik Labs" \
+      org.opencontainers.image.source="https://github.com/MoLik-Labs/ALIST" \
+      org.opencontainers.image.version="4.2.0" \
+      org.opencontainers.image.licenses="AGPL-3.0"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -61,3 +69,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD-SHELL curl -fsS "http://127.0.0.1:${PORT:-${ALIST_PORT}}/ping" || exit 1
 
 ENTRYPOINT ["/entrypoint.sh"]
+CMD ["server"]

@@ -53,6 +53,10 @@ private:
     int64_t boot_unix_ = 0;
 
     std::string precompressed_ui_gzip_;
+    std::string ui_etag_;
+    std::string ui_gzip_etag_;
+    std::string ui_csp_;
+    std::string dummy_pwd_hash_;
 };
 
 } // namespace alist

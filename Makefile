@@ -1,7 +1,7 @@
 CXX           ?= g++
 CXXFLAGS_BASE := -std=c++20 -Iinclude -Ithird_party/sys_shim -Wall -Wextra -Wno-unused-parameter -MMD -MP -pthread
 
-# Auto-detect whether standard -dev linker symlinks exist or fall back to multiarch runtime .so paths
+# Auto-detect development linker symlinks; fall back to runtime library paths in slim images.
 HAS_DEV_LIBS := $(shell printf 'int main(){return 0;}\n' | $(CXX) -x c++ - -lsqlite3 -lcurl -lssl -lcrypto -lz -o /dev/null 2>/dev/null && echo 1 || echo 0)
 
 ifeq ($(HAS_DEV_LIBS),1)
@@ -29,6 +29,8 @@ CORE_NAMES := \
 
 BUILD_DIR := build
 BIN       := alist
+WEBUI_HEADER := include/alist/web_ui.hpp
+WEBUI_INPUTS := web/index.html web/styles.css web/app.js scripts/build_webui.mjs
 
 REL_OBJS   := $(patsubst %,$(BUILD_DIR)/rel/%.o,$(CORE_NAMES) main)
 TEST_OBJS  := $(patsubst %,$(BUILD_DIR)/test/%.o,$(CORE_NAMES)) $(BUILD_DIR)/test/test_main.o
@@ -36,9 +38,22 @@ ASAN_OBJS  := $(patsubst %,$(BUILD_DIR)/asan/%.o,$(CORE_NAMES)) $(BUILD_DIR)/asa
 TSAN_OBJS  := $(patsubst %,$(BUILD_DIR)/tsan/%.o,$(CORE_NAMES)) $(BUILD_DIR)/tsan/test_main.o
 BENCH_OBJS := $(patsubst %,$(BUILD_DIR)/bench/%.o,$(CORE_NAMES)) $(BUILD_DIR)/bench/benchmark.o
 
-.PHONY: all release test asan tsan bench clean
+.PHONY: all release test asan tsan bench webui webui-check webui-test go-build go-compat-test go-db-compat-test clean
 
 all: release
+
+webui: $(WEBUI_HEADER)
+
+webui-check:
+	node scripts/build_webui.mjs --check
+
+webui-test: $(WEBUI_HEADER)
+	npm run test:webui
+
+$(WEBUI_HEADER): $(WEBUI_INPUTS)
+	node scripts/build_webui.mjs
+
+$(filter %/api_routes.o,$(REL_OBJS) $(TEST_OBJS) $(ASAN_OBJS) $(TSAN_OBJS) $(BENCH_OBJS)): $(WEBUI_HEADER)
 
 release: $(BIN)
 
@@ -49,7 +64,7 @@ $(BUILD_DIR)/rel/%.o: src/%.cpp
 $(BIN): $(REL_OBJS)
 	$(CXX) $(CXXFLAGS_BASE) $(RELEASE_FLAGS) $(REL_OBJS) $(RELEASE_LDFLAGS) $(LDLIBS) -s -o $(BIN)
 
-# Fast uninstrumented test binary
+# Fast uninstrumented test binary.
 $(BUILD_DIR)/test/%.o: src/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_BASE) -O2 -g1 -c $< -o $@
@@ -64,7 +79,25 @@ $(BUILD_DIR)/alist_tests: $(TEST_OBJS)
 test: $(BUILD_DIR)/alist_tests
 	./$(BUILD_DIR)/alist_tests
 
-# AddressSanitizer + UndefinedBehaviorSanitizer
+# Experimental Go binary: not a replacement for the native server yet.
+go-build:
+	@mkdir -p $(BUILD_DIR)
+	go build -tags sqlite_fts5 -o $(BUILD_DIR)/alist-go ./cmd/alist-go
+
+# Exercise both directions of the Go/native vault format with the real C++ implementation.
+$(BUILD_DIR)/native_crypto_fixture: tests/native_crypto_fixture.cpp $(BUILD_DIR)/test/crypto.o $(BUILD_DIR)/test/json.o
+	$(CXX) $(CXXFLAGS_BASE) -O2 -g1 $^ $(LDLIBS) -o $@
+
+go-compat-test: $(BUILD_DIR)/native_crypto_fixture
+	KOVA_NATIVE_CRYPTO_FIXTURE="$(abspath $(BUILD_DIR)/native_crypto_fixture)" go test -race ./internal/cryptocompat
+
+$(BUILD_DIR)/native_db_fixture: tests/native_db_fixture.cpp $(BUILD_DIR)/test/db.o $(BUILD_DIR)/test/security.o $(BUILD_DIR)/test/crypto.o $(BUILD_DIR)/test/json.o
+	$(CXX) $(CXXFLAGS_BASE) -O2 -g1 $^ $(LDLIBS) -o $@
+
+go-db-compat-test: $(BUILD_DIR)/native_db_fixture
+	KOVA_NATIVE_DB_FIXTURE="$(abspath $(BUILD_DIR)/native_db_fixture)" go test -race -tags sqlite_fts5 ./internal/nativedb
+
+# AddressSanitizer + UndefinedBehaviorSanitizer.
 $(BUILD_DIR)/asan/%.o: src/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_BASE) $(ASAN_FLAGS) -c $< -o $@
@@ -79,7 +112,7 @@ $(BUILD_DIR)/alist_tests_asan: $(ASAN_OBJS)
 asan: $(BUILD_DIR)/alist_tests_asan
 	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 ./$(BUILD_DIR)/alist_tests_asan
 
-# ThreadSanitizer
+# ThreadSanitizer.
 $(BUILD_DIR)/tsan/%.o: src/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_BASE) $(TSAN_FLAGS) -c $< -o $@
@@ -94,7 +127,7 @@ $(BUILD_DIR)/alist_tests_tsan: $(TSAN_OBJS)
 tsan: $(BUILD_DIR)/alist_tests_tsan
 	TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1 ./$(BUILD_DIR)/alist_tests_tsan
 
-# Benchmark suite
+# Performance and memory benchmark suite.
 $(BUILD_DIR)/bench/%.o: src/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_BASE) $(RELEASE_FLAGS) -c $< -o $@

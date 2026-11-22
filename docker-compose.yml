@@ -1,7 +1,8 @@
 services:
-  alist:
+  kova:
     build: .
-    container_name: alist-nggkhaiz
+    image: kova:4.2.0
+    container_name: kova
     restart: unless-stopped
     init: true
     ports:

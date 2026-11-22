@@ -1,0 +1,8 @@
+name = "kova-edge"
+main = "src/index.js"
+compatibility_date = "2026-11-16"
+workers_dev = true
+
+# Set the HTTPS origin with:
+#   npx wrangler secret put KOVA_ORIGIN
+# Example value: https://your-kova-service.onrender.com

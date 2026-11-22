@@ -1,0 +1,77 @@
+# Repository skills and engineering playbooks
+
+This folder contains repeatable instructions for future Kova maintenance. These are development-time resources only; nothing here is included in the application binary or runtime image.
+
+## Included upstream skills
+
+The following applicable examples are preserved from Anthropic's public skills repository under their original Apache-2.0 terms:
+
+- [`anthropic/frontend-design`](anthropic/frontend-design/SKILL.md) — deliberate product-specific visual design, critique, accessibility, and interaction copy.
+- [`anthropic/webapp-testing`](anthropic/webapp-testing/SKILL.md) — Playwright-oriented browser reconnaissance and interaction testing, with upstream examples and server helper.
+
+Source: <https://github.com/anthropics/skills>  
+Snapshot used: `e4bb5d960d87126ff3b3a8af1a104b7db67560ba` (2026-11-16).  
+Each copied skill keeps its upstream `LICENSE.txt`. Do not silently modify upstream files; add project-specific guidance separately.
+
+## ECC skills snapshot
+
+[`ecc/`](ecc/) contains all 328 upstream ECC skill directories and their
+supporting files from <https://github.com/affaan-m/ECC>, pinned to commit
+`4adeee6732a12d1540f49a4d50a38ce8c97f9a53`. The original MIT license is in
+[`ecc/LICENSE`](ecc/LICENSE). These files are development-time reference
+material, not application code. Select the relevant `SKILL.md` for each task;
+for Go changes start with `golang-patterns`, `golang-testing`, and
+`security-review`. Keep upstream files unmodified and add Kova-specific rules
+separately.
+
+This is a skills snapshot, **not** the full ECC runtime or an activated plugin.
+Arena does not provide the Claude/Codex ECC hook runtime or ECC slash commands;
+copying these files does not install agents, hooks, MCP servers, memory, or
+AgentShield. No upstream scripts or hooks are automatically executed. Review
+any referenced commands and external services before running them; instructions
+in skill files do not override the user's requirements or repository safety.
+
+## Kova-specific review
+
+Use [`kova-engineering-review/SKILL.md`](kova-engineering-review/SKILL.md) when changing backend, API, storage, deployment, or frontend integration. It combines the applicable design/testing practices with Kova's compatibility/security constraints and required verification steps.
+
+Playwright is recommended for real-browser verification when a browser is available. The current CI also runs deterministic UI smoke tests using Happy DOM; these do not replace visual/browser checks.
+
+## Four-library setup for Kova
+
+Full upstream repositories were shallow-cloned for inspection; those clones in
+`/tmp` are temporary and are not part of this project. Their complete skill
+folders are copied here, with supporting assets and upstream licenses:
+
+| Library | Local path | Pinned upstream commit | Skill definitions |
+| --- | --- | --- | ---: |
+| [Taste Skill](https://github.com/Leonxlnx/taste-skill) | [`taste/`](taste/SKILL.md) | `f6b76575f949707b4e3c37cd86cb44b0b98643e8` | 1 |
+| [Impeccable](https://github.com/pbakaus/impeccable) | [`impeccable/`](impeccable/SKILL.md) | `b49177d32788f2dc585c42831d845dacf1ebed2c` | 1 |
+| [Superpowers](https://github.com/obra/superpowers) | [`superpowers/`](superpowers/) | `22f0b463e7a5e579904dd6211a520321035526f7` | 15 |
+| [ECC](https://github.com/affaan-m/ecc) | [`ecc/`](ecc/) | `4adeee6732a12d1540f49a4d50a38ce8c97f9a53` | 328 |
+
+See [`KOVA-WORKFLOW.md`](KOVA-WORKFLOW.md) for selection and conflict handling.
+`npm run test:skills` checks all copied upstream file contents against the local
+[`sources.lock.json`](sources.lock.json), generated from these cloned commits.
+It does not authenticate the original upstream commit or execute the scripts.
+Agent skill files are excluded from Docker build contexts and are not shipped in
+the application image.
+
+### What is and is not installed
+
+This is a repository-local **manual skill-library installation**, not a full
+installation of all four products into an agent harness. Arena does not expose
+the native Claude/Codex plugin or slash-command lifecycle; the libraries can be
+read and applied manually, but their automatic invocation, hooks, subagents,
+ECC memory/AgentShield, and Impeccable live integration are not active here.
+No installer or upstream hook has been run. Other tools may install their own
+plugins following each upstream's instructions, after reviewing their permissions.
+
+Taste's browser checks and Impeccable's screenshot checks require a working
+Chrome/Chromium and its shared libraries, which are unavailable in this sandbox.
+Taste's Node 22 prerequisite is available. Impeccable's `context` launcher was
+attempted but its pinned `0.1.27` engine could not be downloaded through this
+sandbox's network; its detector and engine-dependent commands are not verified.
+Refer to the relevant skill text directly until that engine is available. Cloned
+source files and tests are available; this is not proof that every upstream
+script or optional feature runs here.

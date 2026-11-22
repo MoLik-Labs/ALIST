@@ -7,6 +7,7 @@
 #include "alist/vfs.hpp"
 #include "c_libs.hpp"
 
+#include <cerrno>
 #include <cstring>
 #include <fcntl.h>
 #include <unistd.h>
@@ -363,22 +364,27 @@ public:
         res.stream_fn = [mkey, under_copy](int64_t offset, int64_t length,
                                            const std::function<bool(const char*, size_t)>& sink) -> bool {
             if (length <= 0) return true;
-            // Read 24-byte header + required encrypted chunks [first_chunk .. last_chunk]
             uint64_t first_chunk = static_cast<uint64_t>(offset) / kPlainChunk;
             uint64_t last_chunk  = static_cast<uint64_t>(offset + length - 1) / kPlainChunk;
-            int64_t phys_start   = static_cast<int64_t>(kHeaderSize + first_chunk * kCipherChunk);
-            int64_t phys_end_excl = static_cast<int64_t>(kHeaderSize + (last_chunk + 1) * kCipherChunk);
+
+            // Keep a single FD open for local backing files (zero repeated open() overhead)
+            UniqueFd local_fd;
+            if (under_copy.mode == DownloadResolution::Mode::LocalFile) {
+                local_fd.reset(::open(under_copy.local_path.c_str(), O_RDONLY | O_CLOEXEC));
+                if (!local_fd) return false;
+            }
 
             auto read_backing_slice = [&](int64_t p_off, size_t p_len, std::string& dst) -> bool {
                 dst.clear();
-                if (under_copy.mode == DownloadResolution::Mode::LocalFile) {
-                    UniqueFd fd(::open(under_copy.local_path.c_str(), O_RDONLY | O_CLOEXEC));
-                    if (!fd) return false;
+                if (local_fd) {
                     dst.resize(p_len);
                     size_t got = 0;
                     while (got < p_len) {
-                        ssize_t n = ::pread(fd.get(), dst.data() + got, p_len - got, p_off + static_cast<off_t>(got));
-                        if (n < 0) return false;
+                        ssize_t n = ::pread(local_fd.get(), dst.data() + got, p_len - got, p_off + static_cast<off_t>(got));
+                        if (n < 0) {
+                            if (errno == EINTR) continue;
+                            return false;
+                        }
                         if (n == 0) break;
                         got += static_cast<size_t>(n);
                     }
@@ -395,8 +401,12 @@ public:
                     r.allow_private_net = under_copy.allow_private_net;
                     auto resp = HttpClient::instance().perform(r);
                     if (!resp.ok || (resp.status_code != 206 && resp.status_code != 200)) return false;
-                    if (resp.status_code == 200 && static_cast<size_t>(p_off) < resp.body.size()) {
-                        dst = resp.body.substr(static_cast<size_t>(p_off), p_len);
+                    if (resp.status_code == 200) {
+                        if (static_cast<uint64_t>(p_off) >= resp.body.size()) {
+                            dst.clear();
+                        } else {
+                            dst = resp.body.substr(static_cast<size_t>(p_off), p_len);
+                        }
                     } else {
                         dst = std::move(resp.body);
                     }
@@ -413,34 +423,40 @@ public:
             std::string_view salt_sv(hdr.data() + 8, 16);
             auto file_key = hmac_sha256_bytes(std::string_view(reinterpret_cast<const char*>(mkey.data()), 32), salt_sv);
 
+            // Bounded O(1) RAM streaming: decrypt at most 32 chunks (~2 MiB) per window
+            constexpr uint64_t kWindowChunks = 32;
             std::string enc_window;
-            size_t want_bytes = static_cast<size_t>(phys_end_excl - phys_start);
-            if (!read_backing_slice(phys_start, want_bytes, enc_window)) return false;
-
-            size_t pos = 0;
             int64_t emitted = 0;
-            for (uint64_t cidx = first_chunk; cidx <= last_chunk && pos < enc_window.size(); ++cidx) {
-                size_t c_len = std::min<size_t>(kCipherChunk, enc_window.size() - pos);
-                std::array<uint8_t, 12> iv{};
-                std::memcpy(iv.data(), salt_sv.data(), 4);
-                for (int b = 7; b >= 0; --b) iv[4 + (7 - b)] = static_cast<uint8_t>((cidx >> (b * 8)) & 0xFF);
-                std::string aad_str = "chunk:" + std::to_string(cidx);
 
-                auto dec = aes256_gcm_decrypt_with_iv(file_key, iv,
-                                                     std::string_view(enc_window.data() + pos, c_len), aad_str);
-                if (!dec) return false; // Authenticated GCM tag verification failed!
-                pos += c_len;
+            for (uint64_t win_start = first_chunk; win_start <= last_chunk && emitted < length; win_start += kWindowChunks) {
+                uint64_t win_end = std::min<uint64_t>(last_chunk, win_start + kWindowChunks - 1);
+                int64_t phys_start = static_cast<int64_t>(kHeaderSize + win_start * kCipherChunk);
+                size_t want_bytes  = static_cast<size_t>((win_end - win_start + 1) * kCipherChunk);
+                if (!read_backing_slice(phys_start, want_bytes, enc_window) || enc_window.empty()) return false;
 
-                size_t slice_start = 0;
-                if (cidx == first_chunk) {
-                    slice_start = static_cast<size_t>(offset % static_cast<int64_t>(kPlainChunk));
-                }
-                if (slice_start >= dec->size()) break;
-                size_t avail = dec->size() - slice_start;
-                size_t to_send = static_cast<size_t>(std::min<int64_t>(static_cast<int64_t>(avail), length - emitted));
-                if (to_send > 0) {
-                    if (!sink(dec->data() + slice_start, to_send)) return false;
-                    emitted += static_cast<int64_t>(to_send);
+                size_t pos = 0;
+                for (uint64_t cidx = win_start; cidx <= win_end && pos < enc_window.size() && emitted < length; ++cidx) {
+                    size_t c_len = std::min<size_t>(kCipherChunk, enc_window.size() - pos);
+                    std::array<uint8_t, 12> iv{};
+                    std::memcpy(iv.data(), salt_sv.data(), 4);
+                    for (int b = 7; b >= 0; --b) iv[4 + (7 - b)] = static_cast<uint8_t>((cidx >> (b * 8)) & 0xFF);
+                    std::string aad_str = "chunk:" + std::to_string(cidx);
+
+                    auto dec = aes256_gcm_decrypt_with_iv(file_key, iv,
+                                                         std::string_view(enc_window.data() + pos, c_len), aad_str);
+                    if (!dec) return false;
+                    pos += c_len;
+
+                    size_t slice_start = (cidx == first_chunk)
+                                             ? static_cast<size_t>(offset % static_cast<int64_t>(kPlainChunk))
+                                             : 0;
+                    if (slice_start >= dec->size()) break;
+                    size_t avail = dec->size() - slice_start;
+                    size_t to_send = static_cast<size_t>(std::min<int64_t>(static_cast<int64_t>(avail), length - emitted));
+                    if (to_send > 0) {
+                        if (!sink(dec->data() + slice_start, to_send)) return false;
+                        emitted += static_cast<int64_t>(to_send);
+                    }
                 }
             }
             return emitted == length;

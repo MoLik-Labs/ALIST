@@ -24,6 +24,7 @@ struct OutboundRequest {
     // Optional streaming download callbacks (zero-RAM buffering for large files!)
     std::function<void(int status_code, const std::map<std::string, std::string>& resp_headers)> on_headers;
     std::function<bool(const char* data, size_t len)> on_data;
+    std::function<bool()> should_abort;
 
     // Auth & transport options
     std::string username;

@@ -34,6 +34,7 @@ struct HttpRequest {
     std::string query;
     std::string http_version = "HTTP/1.1";
     std::string remote_ip;
+    bool trusted_proxy = false;
     std::map<std::string, std::string> headers; // lowercased keys
     std::map<std::string, std::string> query_params;
 
@@ -56,11 +57,34 @@ struct HttpRequest {
     }
 
     [[nodiscard]] std::string base_url() const {
-        std::string proto = header("x-forwarded-proto");
-        if (proto.empty()) proto = "http";
-        std::string host = header("x-forwarded-host");
-        if (host.empty()) host = header("host", "localhost");
-        return proto + "://" + host;
+        std::string proto = "http";
+        if (trusted_proxy) {
+            std::string xfp = header("x-forwarded-proto");
+            auto comma = xfp.find(',');
+            if (comma != std::string::npos) xfp.resize(comma);
+            if (xfp == "https" || xfp == "HTTPS") proto = "https";
+            else if (xfp == "http" || xfp == "HTTP") proto = "http";
+        }
+        std::string raw_host;
+        if (trusted_proxy) {
+            raw_host = header("x-forwarded-host");
+            auto comma = raw_host.find(',');
+            if (comma != std::string::npos) raw_host.resize(comma);
+        }
+        if (raw_host.empty()) raw_host = header("host");
+        // Strip leading/trailing spaces and strictly allow RFC 3986 host[:port] characters only
+        size_t a = 0, b = raw_host.size();
+        while (a < b && (raw_host[a] == ' ' || raw_host[a] == '\t')) ++a;
+        while (b > a && (raw_host[b - 1] == ' ' || raw_host[b - 1] == '\t')) --b;
+        std::string_view hv(raw_host.data() + a, b - a);
+        bool valid_host = !hv.empty() && hv.size() <= 255;
+        for (unsigned char ch : hv) {
+            bool ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                      (ch >= '0' && ch <= '9') || ch == '.' || ch == '-' ||
+                      ch == ':' || ch == '[' || ch == ']';
+            if (!ok) { valid_host = false; break; }
+        }
+        return proto + "://" + (valid_host ? std::string(hv) : std::string("localhost"));
     }
 };
 

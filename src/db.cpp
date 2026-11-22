@@ -447,7 +447,19 @@ void Database::seed_defaults(std::string* initial_admin_pwd_out) {
     };
 
     ensure_setting("version", kVersion, "site", true);
-    ensure_setting("site_title", "AList · @nggkhaiz", "site", true);
+    {
+        Stmt sync_ver(db_, "UPDATE x_settings SET value = ?1 WHERE key = 'version';");
+        sync_ver.bind_str(1, kVersion);
+        sync_ver.step();
+    }
+    ensure_setting("site_title", kAppName, "site", true);
+    // Migrate untouched legacy product titles while preserving administrator-customized titles
+    {
+        Stmt mig(db_, "UPDATE x_settings SET value = ?1 WHERE key = 'site_title' AND "
+                      "(value = 'AList · @nggkhaiz' OR value = 'AList @nggkhaiz' OR value = 'Foxlist · @nggkhaiz');");
+        mig.bind_str(1, kAppName);
+        mig.step();
+    }
     ensure_setting("announcement", "", "site", true);
     ensure_setting("pagination_type", "all", "site", true);
     ensure_setting("default_page_size", "50", "site", true);
@@ -458,7 +470,7 @@ void Database::seed_defaults(std::string* initial_admin_pwd_out) {
     ensure_setting("enable_search", "true", "index", true);
     ensure_setting("sign_all", "false", "global", false);
     ensure_setting("link_expiration", "0", "global", false);
-    ensure_setting("token", "nggkhaiz-" + random_hex(24), "global", false);
+    ensure_setting("token", "kova-" + random_hex(24), "global", false);
     ensure_setting("max_devices", "0", "session", false);
     ensure_setting("device_evict_policy", "evict_oldest", "session", false);
     ensure_setting("device_session_ttl", "86400", "session", false);

@@ -1,0 +1,5 @@
+# Heroku Container Stack configuration. Leave run unspecified so the image's
+# ENTRYPOINT and CMD start Kova and honor the platform-provided PORT.
+build:
+  docker:
+    web: Dockerfile

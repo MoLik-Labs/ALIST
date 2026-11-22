@@ -4,6 +4,7 @@
 #include "alist/json.hpp"
 #include "alist/security.hpp"
 
+#include <cerrno>
 #include <climits>
 #include <cstdio>
 #include <dirent.h>
@@ -140,7 +141,7 @@ public:
         }
         struct stat st{};
         int rc = follow_symlinks_ ? ::stat(full->c_str(), &st) : ::lstat(full->c_str(), &st);
-        if (rc != 0 || S_ISDIR(st.st_mode) || (S_ISLNK(st.st_mode) && !follow_symlinks_)) {
+        if (rc != 0 || !S_ISREG(st.st_mode)) {
             err_out = "File not found";
             return std::nullopt;
         }
@@ -210,9 +211,10 @@ public:
         }
         std::error_code ec;
         std::filesystem::create_directories(std::filesystem::path(*dst_full).parent_path(), ec);
+        // Never blindly follow nested symlinks during recursive copy (prevents out-of-root leak)
         auto opts = std::filesystem::copy_options::overwrite_existing |
                     std::filesystem::copy_options::recursive |
-                    (follow_symlinks_ ? std::filesystem::copy_options::none : std::filesystem::copy_options::skip_symlinks);
+                    std::filesystem::copy_options::skip_symlinks;
         std::filesystem::copy(*src_full, *dst_full, opts, ec);
         if (ec) { err_out = ec.message(); return false; }
         return true;
@@ -254,6 +256,7 @@ public:
             size_t written = 0;
             while (written < static_cast<size_t>(n)) {
                 ssize_t w = ::write(fd.get(), buf.data() + written, static_cast<size_t>(n) - written);
+                if (w < 0 && errno == EINTR) continue;
                 if (w <= 0) {
                     err_out = "Disk write failed during upload";
                     return false;

@@ -6,4 +6,9 @@ alist
 *.db-shm
 *.db-wal
 data
+go-data
+node_modules
+deploy/cloudflare-worker/node_modules
 Unselected files
+# Agent skill sources are development-only and must not inflate build contexts.
+skills

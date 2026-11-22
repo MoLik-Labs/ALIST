@@ -81,17 +81,28 @@ constexpr size_t kMaxHeaderBytes        = 32768;
 constexpr size_t kMaxBufferedBodyBytes  = 8 * 1024 * 1024; // 8 MiB for JSON/XML control plane
 constexpr size_t kMaxChunkTrailerBytes  = 4096;
 
-bool parse_chunk_size(std::string_view text, size_t& result) noexcept {
+bool parse_chunk_size(std::string_view text, size_t& result, bool* overflowed = nullptr) noexcept {
+    if (overflowed) *overflowed = false;
     if (text.empty()) return false;
     size_t value = 0;
+    bool saw_overflow = false;
     for (unsigned char ch : text) {
         size_t digit;
         if (ch >= '0' && ch <= '9') digit = ch - '0';
         else if (ch >= 'a' && ch <= 'f') digit = ch - 'a' + 10;
         else if (ch >= 'A' && ch <= 'F') digit = ch - 'A' + 10;
         else return false;
-        if (value > (std::numeric_limits<size_t>::max() - digit) / 16) return false;
-        value = value * 16 + digit;
+        if (!saw_overflow) {
+            if (value > (std::numeric_limits<size_t>::max() - digit) / 16) {
+                saw_overflow = true;
+            } else {
+                value = value * 16 + digit;
+            }
+        }
+    }
+    if (saw_overflow) {
+        if (overflowed) *overflowed = true;
+        return false;
     }
     result = value;
     return true;
@@ -142,6 +153,43 @@ bool send_all_flags(int fd, const char* data, size_t len, int extra_flags, std::
 
 bool send_all(int fd, const char* data, size_t len, std::atomic<uint64_t>* bytes_counter = nullptr) {
     return send_all_flags(fd, data, len, 0, bytes_counter);
+}
+
+// Serialize HTTP response headers while stripping CR/LF to defeat HTTP Response Splitting
+void append_safe_headers(std::string& wire, const std::map<std::string, std::string>& headers) {
+    for (const auto& [k, v] : headers) {
+        if (k.empty()) continue;
+        for (char c : k) {
+            if (c != '\r' && c != '\n' && c != ':') wire.push_back(c);
+        }
+        wire.append(": ", 2);
+        for (char c : v) {
+            if (c != '\r' && c != '\n') wire.push_back(c);
+        }
+        wire.append("\r\n", 2);
+    }
+    wire.append("\r\n", 2);
+}
+
+// RFC 7232 If-None-Match comparison supporting comma-separated lists and weak W/ prefixes
+bool if_none_match_hit(std::string_view inm_header, std::string_view etag) noexcept {
+    if (inm_header.empty() || etag.empty()) return false;
+    auto strip_weak = [](std::string_view s) noexcept {
+        s = trim_ascii(s);
+        if (s.starts_with("W/") || s.starts_with("w/")) s.remove_prefix(2);
+        return s;
+    };
+    std::string_view target = strip_weak(etag);
+    size_t pos = 0;
+    while (pos < inm_header.size()) {
+        auto comma = inm_header.find(',', pos);
+        std::string_view tok = trim_ascii(
+            comma == std::string_view::npos ? inm_header.substr(pos) : inm_header.substr(pos, comma - pos));
+        if (tok == "*" || strip_weak(tok) == target) return true;
+        if (comma == std::string_view::npos) break;
+        pos = comma + 1;
+    }
+    return false;
 }
 
 class SocketReader {
@@ -242,13 +290,20 @@ bool drain_chunk_trailers(SocketReader& reader) {
 }
 
 void parse_query_map(std::string_view q, std::map<std::string, std::string>& out) {
-    for (auto pair_sv : split_sv(q, '&', true)) {
-        auto eq = pair_sv.find('=');
-        std::string_view k_raw = (eq == std::string_view::npos) ? pair_sv : pair_sv.substr(0, eq);
-        std::string_view v_raw = (eq == std::string_view::npos) ? std::string_view{} : pair_sv.substr(eq + 1);
-        auto k = url_decode(k_raw, true);
-        auto v = url_decode(v_raw, true);
-        if (k && v) out[std::move(*k)] = std::move(*v);
+    // Parse in place instead of allocating a temporary vector for every query.
+    while (!q.empty()) {
+        auto amp = q.find('&');
+        auto pair_sv = q.substr(0, amp);
+        if (!pair_sv.empty()) {
+            auto eq = pair_sv.find('=');
+            std::string_view k_raw = (eq == std::string_view::npos) ? pair_sv : pair_sv.substr(0, eq);
+            std::string_view v_raw = (eq == std::string_view::npos) ? std::string_view{} : pair_sv.substr(eq + 1);
+            auto k = url_decode(k_raw, true);
+            auto v = url_decode(v_raw, true);
+            if (k && v) out[std::move(*k)] = std::move(*v);
+        }
+        if (amp == std::string_view::npos) break;
+        q.remove_prefix(amp + 1);
     }
 }
 
@@ -399,9 +454,21 @@ void HttpServer::accept_loop() {
                     }
                     char ipbuf[INET_ADDRSTRLEN]{};
                     ::inet_ntop(AF_INET, &caddr.sin_addr, ipbuf, sizeof(ipbuf));
+                    bool accepted = false;
                     {
                         std::lock_guard<std::mutex> lk(queue_mu_);
-                        conn_queue_.push_back(ConnItem{cfd, std::string(ipbuf)});
+                        size_t in_flight = static_cast<size_t>(std::max(0, active_conns_.load(std::memory_order_relaxed))) +
+                                           conn_queue_.size();
+                        if (in_flight < static_cast<size_t>(max_connections_)) {
+                            conn_queue_.push_back(ConnItem{cfd, std::string(ipbuf)});
+                            accepted = true;
+                        }
+                    }
+                    if (!accepted) {
+                        static constexpr std::string_view kBusy = "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                        send_all(cfd, kBusy.data(), kBusy.size());
+                        ::close(cfd);
+                        continue;
                     }
                     queue_cv_.notify_one();
                 }
@@ -419,8 +486,10 @@ void HttpServer::worker_loop() {
             if (!running_.load(std::memory_order_relaxed) && conn_queue_.empty()) return;
             item = std::move(conn_queue_.front());
             conn_queue_.pop_front();
+            // Transfer the slot from the pending queue to the active count under
+            // the same lock used by accept_loop's in-flight limit check.
+            active_conns_.fetch_add(1, std::memory_order_relaxed);
         }
-        active_conns_.fetch_add(1, std::memory_order_relaxed);
         handle_connection(item.fd, std::move(item.ip));
         active_conns_.fetch_sub(1, std::memory_order_relaxed);
     }
@@ -437,11 +506,14 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
     ::setsockopt(fd.get(), SOL_SOCKET, SO_SNDTIMEO, &stv, sizeof(stv));
 
     SocketReader reader(fd.get(), &bytes_received_);
+    // Reuse the header buffer across keep-alive requests instead of allocating
+    // and freeing a fresh string for every request on the same connection.
+    std::string raw_hdr;
+    raw_hdr.reserve(2048);
     int req_count = 0;
 
     while (running_.load(std::memory_order_relaxed) && req_count < 500) {
         ++req_count;
-        std::string raw_hdr;
         if (!reader.read_until("\r\n\r\n", raw_hdr, kMaxHeaderBytes)) {
             break;
         }
@@ -510,8 +582,8 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
             break;
         }
 
-        // Security: Only honor X-Forwarded-For when trust_proxy_ is explicitly enabled
-        // (prevents untrusted clients from spoofing X-Forwarded-For to bypass IP rate limits!)
+        // Security: Only honor X-Forwarded-For / Proto / Host when trust_proxy_ is explicitly enabled
+        req.trusted_proxy = trust_proxy_;
         if (trust_proxy_) {
             if (auto xff = req.header("x-forwarded-for"); !xff.empty()) {
                 auto comma = xff.find(',');
@@ -598,15 +670,24 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
             }
         } else {
             if (req.is_chunked) {
+                bool too_large = false;
                 while (true) {
                     std::string sz_line;
-                    if (!reader.read_until("\r\n", sz_line, 128)) { body_fully_drained = false; break; }
-                    std::string_view sv = trim_ascii(std::string_view(sz_line).substr(0, sz_line.size() - 2));
+                    if (!reader.read_until("\r\n", sz_line, 128) || sz_line.size() < 2) { body_fully_drained = false; break; }
+                    std::string_view sv = std::string_view(sz_line).substr(0, sz_line.size() - 2);
                     auto semi = sv.find(';');
                     if (semi != std::string_view::npos) sv = sv.substr(0, semi);
+                    sv = trim_ascii(sv);
                     size_t csz = 0;
-                    if (!parse_chunk_size(sv, csz) || csz > kMaxBufferedBodyBytes - req.body.size()) {
+                    bool ovf = false;
+                    if (!parse_chunk_size(sv, csz, &ovf)) {
                         body_fully_drained = false;
+                        too_large = ovf;
+                        break;
+                    }
+                    if (csz > kMaxBufferedBodyBytes - req.body.size()) {
+                        body_fully_drained = false;
+                        too_large = true;
                         break;
                     }
                     if (csz == 0) {
@@ -617,15 +698,20 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
                     req.body.resize(old_sz + csz);
                     if (!reader.read_exact(req.body.data() + old_sz, csz)) { body_fully_drained = false; break; }
                     char crlf[2];
-                    if (!reader.read_exact(crlf, 2)) { body_fully_drained = false; break; }
+                    if (!reader.read_exact(crlf, 2) || crlf[0] != '\r' || crlf[1] != '\n') {
+                        body_fully_drained = false;
+                        break;
+                    }
                 }
                 if (!body_fully_drained) {
                     static constexpr std::string_view kLarge = "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-                    send_all(fd.get(), kLarge.data(), kLarge.size());
+                    static constexpr std::string_view kBadChunk = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                    const auto& err_wire = too_large ? kLarge : kBadChunk;
+                    send_all(fd.get(), err_wire.data(), err_wire.size());
                     break;
                 }
             } else if (req.content_length > 0) {
-                if (static_cast<size_t>(req.content_length) > kMaxBufferedBodyBytes) {
+                if (static_cast<uint64_t>(req.content_length) > kMaxBufferedBodyBytes) {
                     static constexpr std::string_view kLarge = "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
                     send_all(fd.get(), kLarge.data(), kLarge.size());
                     break;
@@ -636,9 +722,9 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
         }
 
         HttpResponse resp;
-        // Baseline security headers (Note: no X-Frame-Options: DENY on UI so live iframe preview works cleanly!)
+        // Baseline security headers (no X-Frame-Options: DENY on UI so live iframe preview works cleanly)
         resp.headers["X-Content-Type-Options"] = "nosniff";
-        resp.headers["Server"] = "AList-nggkhaiz/4.1";
+        resp.headers["Server"] = "Kova/4.2";
 
         if (handler_) {
             try {
@@ -647,6 +733,11 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
                 LOG_ERROR("http", std::string("Unhandled handler exception: ") + ex.what());
                 resp.set_json(500, R"({"code":500,"message":"internal server error","data":null})");
             }
+        }
+
+        // Restore strict 15s keep-alive header timeout after any streaming upload request
+        if (use_streaming_body) {
+            ::setsockopt(fd.get(), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         }
 
         bool want_close = !body_fully_drained ||
@@ -658,49 +749,53 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
 
         // Case 1: Zero-Copy Kernel sendfile64() Local File Delivery
         if (!resp.sendfile_path.empty()) {
-            UniqueFd ffd(::open(resp.sendfile_path.c_str(), O_RDONLY | O_CLOEXEC));
-            if (!ffd) {
+            UniqueFd ffd(::open(resp.sendfile_path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK));
+            struct stat live_st{};
+            if (!ffd || ::fstat(ffd.get(), &live_st) != 0 || !S_ISREG(live_st.st_mode)) {
                 resp.sendfile_path.clear();
                 resp.set_json(404, R"({"code":404,"message":"file not found","data":null})");
             } else {
+                // Clear O_NONBLOCK now that we verified it is a regular file (never blocks on FIFO!)
+                int fl = ::fcntl(ffd.get(), F_GETFL, 0);
+                if (fl >= 0) ::fcntl(ffd.get(), F_SETFL, fl & ~O_NONBLOCK);
+                int64_t actual_size = std::max<int64_t>(0, static_cast<int64_t>(live_st.st_size));
+
                 resp.headers["Accept-Ranges"] = "bytes";
                 if (!resp.sendfile_etag.empty()) resp.headers["ETag"] = resp.sendfile_etag;
                 if (resp.sendfile_mtime > 0) resp.headers["Last-Modified"] = format_http_date(resp.sendfile_mtime);
 
                 // Conditional ETag check (304 Not Modified)
                 std::string inm = req.header("if-none-match");
-                if (!inm.empty() && !resp.sendfile_etag.empty() && inm == resp.sendfile_etag && req.header("range").empty()) {
+                if (if_none_match_hit(inm, resp.sendfile_etag)) {
                     resp.status = 304;
                     resp.headers["Content-Length"] = "0";
                     std::string wire = "HTTP/1.1 304 Not Modified\r\n";
-                    for (const auto& [k, v] : resp.headers) wire += k + ": " + v + "\r\n";
-                    wire += "\r\n";
-                    if (!send_all(fd.get(), wire.data(), wire.size())) break;
+                    append_safe_headers(wire, resp.headers);
+                    if (!send_all(fd.get(), wire.data(), wire.size(), &bytes_sent_)) break;
                     if (want_close) break;
                     continue;
                 }
 
                 bool unsat = false;
-                auto rng = parse_http_range(req.header("range"), resp.sendfile_size, &unsat);
+                auto rng = parse_http_range(req.header("range"), actual_size, &unsat);
                 if (unsat) {
                     resp.status = 416;
-                    resp.headers["Content-Range"] = "bytes */" + std::to_string(resp.sendfile_size);
+                    resp.headers["Content-Range"] = "bytes */" + std::to_string(actual_size);
                     resp.headers["Content-Length"] = "0";
                     std::string wire = "HTTP/1.1 416 Range Not Satisfiable\r\n";
-                    for (const auto& [k, v] : resp.headers) wire += k + ": " + v + "\r\n";
-                    wire += "\r\n";
-                    send_all(fd.get(), wire.data(), wire.size());
+                    append_safe_headers(wire, resp.headers);
+                    send_all(fd.get(), wire.data(), wire.size(), &bytes_sent_);
                     break;
                 }
 
                 int64_t offset = 0;
-                int64_t send_len = resp.sendfile_size;
+                int64_t send_len = actual_size;
                 if (rng) {
                     resp.status = 206;
                     offset = rng->start;
                     send_len = rng->end - rng->start + 1;
                     resp.headers["Content-Range"] = "bytes " + std::to_string(rng->start) + "-" +
-                                                    std::to_string(rng->end) + "/" + std::to_string(resp.sendfile_size);
+                                                    std::to_string(rng->end) + "/" + std::to_string(actual_size);
                 } else {
                     resp.status = 200;
                 }
@@ -708,8 +803,7 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
 
                 const char* reason = resp.status_text.empty() ? default_reason_phrase(resp.status) : resp.status_text.c_str();
                 std::string wire = "HTTP/1.1 " + std::to_string(resp.status) + " " + reason + "\r\n";
-                for (const auto& [k, v] : resp.headers) wire += k + ": " + v + "\r\n";
-                wire += "\r\n";
+                append_safe_headers(wire, resp.headers);
                 // Coalesce HTTP response headers with the first sendfile64() kernel page via MSG_MORE!
                 int hdr_flags = (!is_head && send_len > 0) ? MSG_MORE : 0;
                 if (!send_all_flags(fd.get(), wire.data(), wire.size(), hdr_flags, &bytes_sent_)) break;
@@ -760,8 +854,7 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
             }
             const char* reason = resp.status_text.empty() ? default_reason_phrase(resp.status) : resp.status_text.c_str();
             std::string wire = "HTTP/1.1 " + std::to_string(resp.status) + " " + reason + "\r\n";
-            for (const auto& [k, v] : resp.headers) wire += k + ": " + v + "\r\n";
-            wire += "\r\n";
+            append_safe_headers(wire, resp.headers);
             if (!send_all(fd.get(), wire.data(), wire.size(), &bytes_sent_)) break;
 
             if (!is_head) {
@@ -784,18 +877,32 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
             continue;
         }
 
-        // Case 3: Standard Buffered Response (with automatic Gzip compression!)
+        // Conditional ETag check (304 Not Modified) for buffered responses (e.g. embedded Web UI)
+        if ((req.method == "GET" || req.method == "HEAD") && resp.status == 200) {
+            if (auto et = resp.headers.find("ETag"); et != resp.headers.end() &&
+                if_none_match_hit(req.header("if-none-match"), et->second)) {
+                resp.status = 304;
+                resp.body.clear();
+                resp.headers.erase("Content-Encoding");
+                resp.headers.erase("Content-Type");
+            }
+        }
+
+        // Case 3: Standard Buffered Response (with automatic Gzip compression)
         if (!resp.pre_compressed && resp.body.size() >= 1024 && resp.status != 204 && resp.status != 304) {
-            std::string ae = to_lower_ascii(req.header("accept-encoding"));
-            std::string ct = to_lower_ascii(resp.headers["Content-Type"]);
+            const bool accepts_gzip = accepts_gzip_encoding(req.header("accept-encoding"));
+            auto ct_it = resp.headers.find("Content-Type");
+            std::string ct = ct_it != resp.headers.end() ? to_lower_ascii(ct_it->second) : "";
             bool compressible = ct.starts_with("application/json") || ct.starts_with("text/") ||
                                 ct.starts_with("application/xml") || ct.starts_with("application/javascript") ||
                                 ct.find("svg") != std::string::npos;
-            if (compressible && ae.find("gzip") != std::string::npos) {
+            if (compressible && accepts_gzip) {
                 if (auto gz = gzip_compress(resp.body, 5)) {
                     resp.body = std::move(*gz);
                     resp.headers["Content-Encoding"] = "gzip";
-                    resp.headers["Vary"] = "Accept-Encoding";
+                    auto& vary = resp.headers["Vary"];
+                    if (vary.empty()) vary = "Accept-Encoding";
+                    else if (vary.find("Accept-Encoding") == std::string::npos) vary += ", Accept-Encoding";
                 }
             }
         }
@@ -809,10 +916,7 @@ void HttpServer::handle_connection(int client_fd, std::string remote_ip) {
         std::string wire;
         wire.reserve(256 + (is_head ? 0 : resp.body.size()));
         wire += "HTTP/1.1 " + std::to_string(resp.status) + " " + reason + "\r\n";
-        for (const auto& [k, v] : resp.headers) {
-            wire += k + ": " + v + "\r\n";
-        }
-        wire += "\r\n";
+        append_safe_headers(wire, resp.headers);
         if (!is_head && !resp.body.empty()) {
             wire += resp.body;
         }

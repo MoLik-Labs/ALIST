@@ -1,9 +1,9 @@
-# Render Blueprint: deploy the standalone C++ service as a Docker web service.
-# Attach persistent storage at /opt/alist/data; SQLite data is not portable across
-# ephemeral instances without a disk. Configure a paid plan with disk support.
+# Render Blueprint for the standalone Kova service.
+# Keep the persistent disk mounted at /opt/alist/data: it contains SQLite data,
+# the signing key, account records, and storage configuration.
 services:
   - type: web
-    name: alist-nggkhaiz
+    name: kova
     runtime: docker
     plan: starter
     region: singapore
@@ -20,6 +20,6 @@ services:
       - key: TZ
         value: UTC
     disk:
-      name: alist-data
+      name: kova-data
       mountPath: /opt/alist/data
       sizeGB: 1

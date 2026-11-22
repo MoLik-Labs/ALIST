@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Kova — Tệp của bạn</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="/"><span class="brand-mark">K<span>•</span></span><span>Kova<small> GO PREVIEW</small></span></a><div class="top-actions"><span class="local-badge"><i></i> LOCAL STORAGE</span><button id="logout" class="button secondary" type="button" hidden>Đăng xuất</button></div></header>
+  <main>
+    <section class="intro"><div><div class="eyebrow"><span></span> KHÔNG GIAN CỦA BẠN</div><h1>Tệp của bạn,<br><em>trong tầm tay.</em></h1><p>Một nơi gọn gàng để xem và tải tệp từ kho cục bộ của bạn.</p></div><div class="intro-note"><span>01 / PREVIEW</span><p>Phiên bản Go thử nghiệm.<br>Dữ liệu được giữ trên máy chủ của bạn.</p></div></section>
+    <section id="login" class="panel login-panel" aria-labelledby="login-title"><div class="panel-icon">↗</div><div><span class="overline">BẮT ĐẦU</span><h2 id="login-title">Kết nối với kho của bạn</h2><p>Nhập token do quản trị viên cấu hình. Token chỉ được giữ trong bộ nhớ của tab này.</p><form id="login-form"><label for="token">Access token</label><div class="login-row"><input id="token" type="password" required autocomplete="off" spellcheck="false" placeholder="Nhập token của bạn"><button type="submit" class="button primary">Kết nối <span>↗</span></button></div></form><div class="help">Chỉ kết nối qua HTTPS hoặc localhost. Phiên bản này chưa hỗ trợ tài khoản người dùng.</div></div></section>
+    <section id="workspace" class="workspace" hidden aria-labelledby="workspace-title"><div class="workspace-head"><div><span class="overline">KHO CỤC BỘ / FILES</span><h2 id="workspace-title">Thư viện tệp</h2><p id="current-path" class="current-path">/</p></div><div class="actions"><button class="button secondary" id="mkdir" type="button" hidden>＋ <span>Thư mục</span></button><button class="button secondary" id="share-manage" type="button" hidden>Liên kết chia sẻ</button><button class="button secondary" id="refresh" type="button">↻ <span>Làm mới</span></button><label class="button primary upload-button" id="upload-control" for="upload" hidden>＋ <span>Tải lên</span></label><input id="upload" type="file" hidden></div></div><div class="upload-hint">Tạo/tải lên cần <code>--allow-write</code>; xóa cần <code>--allow-delete</code>; đổi tên cần <code>--allow-move</code>. Chỉ xóa thư mục rỗng; upload tối đa 64 MiB.</div><div class="toolbar"><nav id="breadcrumbs" aria-label="Đường dẫn"></nav><span id="count" class="count"></span></div><div class="table-scroll"><table><thead><tr><th>TÊN</th><th>KÍCH THƯỚC</th><th>THAY ĐỔI</th><th><span class="sr-only">Thao tác</span></th></tr></thead><tbody id="file-list"></tbody></table></div><div id="empty" class="empty" hidden><span>◇</span><strong>Chưa có tệp nào</strong><p>Thư mục này đang trống.</p></div></section>
+    <section id="share-list-panel" class="share-result" aria-labelledby="share-list-title" hidden>
+      <h2 id="share-list-title">Liên kết đang hoạt động</h2>
+      <p>Liên kết chỉ tồn tại trên máy chủ này và mất khi máy chủ khởi động lại.</p>
+      <div id="share-list" aria-live="polite"></div>
+      <button id="share-list-close" class="button secondary" type="button">Đóng danh sách</button>
+    </section>
+    <section id="share-result" class="share-result" aria-labelledby="share-title" hidden>
+      <h2 id="share-title">Liên kết chia sẻ tạm thời</h2>
+      <p id="share-expiry"></p>
+      <p>Ai có liên kết đều có thể tải tệp. Liên kết tồn tại tối đa một giờ và mất khi máy chủ khởi động lại. Đóng khung hoặc đăng xuất không thu hồi liên kết. Dùng mục Liên kết chia sẻ để xem và thu hồi những liên kết còn hiệu lực.</p>
+      <label for="share-url">Liên kết chỉ đọc</label>
+      <input id="share-url" type="text" readonly autocomplete="off" spellcheck="false">
+      <div class="share-actions"><button id="share-copy" class="button secondary" type="button">Sao chép</button><button id="share-revoke" class="button secondary" type="button">Thu hồi liên kết</button><button id="share-close" class="button secondary" type="button">Đóng</button></div>
+    </section>
+    <div id="message" class="message" role="status" aria-live="polite" hidden></div>
+  </main>
+  <footer><span><b>K<span>•</span></b> &nbsp; KOVA</span><span>YOUR SPACE. YOUR RULES.</span><span>EXPERIMENTAL / GO</span></footer>
+</body>
+</html>

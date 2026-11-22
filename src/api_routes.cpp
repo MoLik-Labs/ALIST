@@ -112,10 +112,36 @@ ApiRouter::ApiRouter(AppConfig& cfg, Database& db, VfsEngine& vfs, TaskManager& 
       down_limiter_(cfg.download_rate_limit_bps),
       up_limiter_(cfg.upload_rate_limit_bps),
       webdav_(vfs, login_bf_, up_limiter_),
-      boot_unix_(unix_now()) {
+      boot_unix_(unix_now()),
+      dummy_pwd_hash_(hash_password_pbkdf2("kova-timing-pad-constant")) {
     if (auto gz = gzip_compress(kEmbeddedWebUiHtml, 9)) {
         precompressed_ui_gzip_ = std::move(*gz);
     }
+    ui_etag_ = "\"" + sha256_hex(kEmbeddedWebUiHtml).substr(0, 24) + "\"";
+    if (!precompressed_ui_gzip_.empty()) {
+        ui_gzip_etag_ = "\"" + sha256_hex(precompressed_ui_gzip_).substr(0, 24) + "\"";
+    }
+    // Compute exact SHA-256 CSP digest of the embedded <script> block so injected inline scripts/handlers are blocked
+    std::string script_src = "'self'";
+    auto s_open = kEmbeddedWebUiHtml.find("<script>");
+    auto s_close = (s_open != std::string_view::npos)
+                       ? kEmbeddedWebUiHtml.find("</script>", s_open + 8)
+                       : std::string_view::npos;
+    if (s_open != std::string_view::npos && s_close != std::string_view::npos &&
+        kEmbeddedWebUiHtml.find("<script", s_open + 8) == std::string_view::npos &&
+        kEmbeddedWebUiHtml.find(" onclick=") == std::string_view::npos) {
+        std::string_view script_body = kEmbeddedWebUiHtml.substr(s_open + 8, s_close - (s_open + 8));
+        auto digest = sha256_bytes(script_body);
+        std::string_view dsv(reinterpret_cast<const char*>(digest.data()), digest.size());
+        script_src += " 'sha256-" + base64_encode(dsv) + "'";
+    } else {
+        // Fail closed: if the bundle shape is unexpected, do not grant inline script execution.
+        // The Web UI integrity check catches this before release builds.
+    }
+    ui_csp_ = "default-src 'self'; script-src " + script_src +
+              "; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; "
+              "media-src 'self' blob: https: http:; connect-src 'self'; font-src 'self' data:; "
+              "frame-src 'self' blob:; frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'";
 }
 
 bool ApiRouter::should_stream_request_body(const HttpRequest& req_head) const {
@@ -132,14 +158,32 @@ void ApiRouter::serve_spa(const HttpRequest& req, HttpResponse& resp) const {
     resp.status = 200;
     resp.headers["Content-Type"] = "text/html; charset=utf-8";
     resp.headers["Cache-Control"] = "no-cache";
-    if (!precompressed_ui_gzip_.empty() &&
-        to_lower_ascii(req.header("accept-encoding")).find("gzip") != std::string::npos) {
+    resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    resp.headers["Content-Security-Policy"] = ui_csp_;
+
+    auto& vary = resp.headers["Vary"];
+    bool varies_by_encoding = false;
+    for (auto item : split_sv(vary, ',')) {
+        if (iequals_ascii(trim_ascii(item), "accept-encoding")) {
+            varies_by_encoding = true;
+            break;
+        }
+    }
+    if (!varies_by_encoding) {
+        if (!vary.empty()) vary += ", ";
+        vary += "Accept-Encoding";
+    }
+
+    const bool use_gzip = !precompressed_ui_gzip_.empty() &&
+                          accepts_gzip_encoding(req.header("accept-encoding"));
+    if (use_gzip) {
         resp.body = precompressed_ui_gzip_;
         resp.headers["Content-Encoding"] = "gzip";
-        resp.headers["Vary"] = "Accept-Encoding";
+        resp.headers["ETag"] = ui_gzip_etag_;
         resp.pre_compressed = true;
     } else {
         resp.body.assign(kEmbeddedWebUiHtml);
+        resp.headers["ETag"] = ui_etag_;
     }
 }
 
@@ -343,13 +387,11 @@ void ApiRouter::handle_share_download(HttpRequest& req, HttpResponse& resp, bool
         }
         target_vpath = std::move(*joined);
     }
-
-    // Enforce atomic max_downloads quota on non-Range-continuation or initial GET
-    if (req.method == "GET" && (req.header("range").empty() || req.header("range").starts_with("bytes=0-"))) {
-        if (!db_.increment_share_counter(share_id, true)) {
-            resp.set_json(403, R"({"code":403,"message":"share download quota exhausted","data":null})");
-            return;
-        }
+    // A share is not a permanent bypass for path-meta hide rules. Re-check both
+    // the original file share and every descendant on each public request.
+    if (vfs_.is_hidden_by_meta(target_vpath)) {
+        resp.set_json(404, R"({"code":404,"message":"shared file not found","data":null})");
+        return;
     }
 
     std::string derr;
@@ -358,19 +400,34 @@ void ApiRouter::handle_share_download(HttpRequest& req, HttpResponse& resp, bool
         resp.set_json(404, R"({"code":404,"message":"shared file unavailable","data":null})");
         return;
     }
+    // Count each successful GET request, including byte ranges. Treating only
+    // `bytes=0-` as a download lets a caller evade max_downloads with `bytes=1-`.
+    if (req.method == "GET" && !db_.increment_share_counter(share_id, true)) {
+        resp.set_json(403, R"({"code":403,"message":"share download quota exhausted","data":null})");
+        return;
+    }
     WebDavServer::serve_resolution(req, resp, *dl, force_proxy, true);
 }
 
 void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
-    // Global CORS headers (supports any preview host / origin cleanly!)
-    std::string origin = req.header("origin", "*");
-    resp.headers["Access-Control-Allow-Origin"] = origin.empty() ? "*" : origin;
+    // Global CORS headers (supports live preview hosts and cross-origin WebDAV/API clients)
+    std::string origin = req.header("origin");
+    if (origin.empty()) {
+        resp.headers["Access-Control-Allow-Origin"] = "*";
+    } else {
+        resp.headers["Access-Control-Allow-Origin"] = origin;
+        resp.headers["Vary"] = "Origin";
+    }
     resp.headers["Access-Control-Allow-Methods"] =
         "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD, PROPFIND, PROPPATCH, MKCOL, COPY, MOVE, LOCK, UNLOCK";
     resp.headers["Access-Control-Allow-Headers"] =
         "Origin, Content-Length, Content-Type, Authorization, Password, File-Path, As-Task, Overwrite, "
-        "Range, If-None-Match, If-Modified-Since, Depth, Destination, Lock-Token, Timeout, If, Client-Id, X-Share-Token";
+        "Range, If-None-Match, If-Modified-Since, Depth, Destination, Lock-Token, Timeout, If, Client-Id, X-Share-Token, X-OTP-Code";
     resp.headers["Access-Control-Expose-Headers"] = "Content-Length, Content-Range, Content-Disposition, ETag";
+
+    auto effective_base_url = [&]() -> std::string {
+        return cfg_.site_url.empty() ? req.base_url() : cfg_.site_url;
+    };
 
     if (req.method == "OPTIONS" && !req.path.starts_with("/dav")) {
         resp.status = 204;
@@ -418,11 +475,14 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
         auto settings = db_.list_settings(true);
         JsonValue data = JsonValue::object();
         for (const auto& [k, v] : settings) data[k] = v;
+        data["app_name"] = kAppName;
         data["version"] = kVersion;
         data["web_version"] = kWebVersion;
         data["engine"] = kEngine;
         data["author"] = kAuthor;
         data["author_url"] = kAuthorUrl;
+        auto guest = db_.get_guest_user();
+        data["guest_enabled"] = (guest && !guest->disabled);
         json_ok(resp, std::move(data));
         return;
     }
@@ -437,21 +497,38 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
     if (req.path == "/api/public/share/info") {
         std::string sid = req.query_param("share_id");
         auto sh = db_.get_share(sid);
-        if (!sh || sh->disabled || (sh->expires_at > 0 && unix_now() > sh->expires_at)) {
+        if (!sh || sh->disabled || (sh->expires_at > 0 && unix_now() > sh->expires_at) ||
+            vfs_.is_hidden_by_meta(sh->path)) {
             json_err(resp, 404, "Share link does not exist or has expired");
             return;
         }
         db_.increment_share_counter(sid, false);
         auto [_, base] = split_vpath(sh->path);
+        std::string display_name = base.empty() ? "/" : base;
+        int64_t fsize = 0;
+        int ftype = sh->is_dir ? 1 : classify_file_type(display_name, false);
+        int64_t fmod = sh->updated_at;
+        if (!sh->is_dir && !sh->has_password) {
+            auto obj = vfs_.get_obj(nullptr, sh->path, "", "");
+            if (obj.ok) {
+                fsize = obj.entry.size;
+                ftype = obj.entry.type;
+                fmod  = obj.entry.modified;
+            }
+        }
         json_ok(resp, JsonValue::object({
             {"share_id",      sh->share_id},
-            {"name",          base.empty() ? "/" : base},
+            {"name",          display_name},
             {"is_dir",        sh->is_dir},
+            {"size",          fsize},
+            {"type",          ftype},
+            {"modified",      fmod},
             {"creator",       sh->creator_name},
             {"has_password",  sh->has_password},
             {"expires_at",    sh->expires_at},
             {"max_downloads", sh->max_downloads},
             {"downloads",     sh->downloads},
+            {"views",         sh->views + 1},
         }));
         return;
     }
@@ -464,7 +541,8 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
         std::string sid = body.get("share_id").as_str();
         std::string pw  = body.get("password").as_str();
         auto sh = db_.get_share(sid);
-        if (!sh || sh->disabled || (sh->expires_at > 0 && unix_now() > sh->expires_at)) {
+        if (!sh || sh->disabled || (sh->expires_at > 0 && unix_now() > sh->expires_at) ||
+            vfs_.is_hidden_by_meta(sh->path)) {
             json_err(resp, 404, "Share not found");
             return;
         }
@@ -484,7 +562,8 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
         std::string sid = body.get("share_id").as_str();
         std::string sub = body.get("path").as_str("/");
         auto sh = db_.get_share(sid);
-        if (!sh || sh->disabled || !sh->is_dir || (sh->expires_at > 0 && unix_now() > sh->expires_at)) {
+        if (!sh || sh->disabled || !sh->is_dir || (sh->expires_at > 0 && unix_now() > sh->expires_at) ||
+            vfs_.is_hidden_by_meta(sh->path)) {
             json_err(resp, 404, "Folder share not found or expired");
             return;
         }
@@ -502,18 +581,27 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
             json_err(resp, 403, "Illegal share subpath");
             return;
         }
+        if (vfs_.is_hidden_by_meta(*target)) {
+            json_err(resp, 404, "Folder not found");
+            return;
+        }
         auto ls = vfs_.list_dir(nullptr, *target, "", false);
         if (!ls.ok) { json_err(resp, ls.http_status, ls.error); return; }
         JsonValue arr = JsonValue::array();
-        for (const auto& f : ls.entries) arr.push_back(f.to_json());
+        for (const auto& f : ls.entries) {
+            auto child_vp = join_vpath(*target, f.name);
+            if (!child_vp || !is_subpath(*target, *child_vp) || vfs_.is_hidden_by_meta(*child_vp)) continue;
+            arr.push_back(f.to_json());
+        }
+        int64_t visible_total = static_cast<int64_t>(arr.as_array().size());
         json_ok(resp, JsonValue::object({
             {"content", std::move(arr)},
-            {"total",   static_cast<int64_t>(ls.entries.size())},
+            {"total",   visible_total},
         }));
         return;
     }
 
-    // Login Endpoint (with per-IP Brute-Force Protection + TOTP 2FA Replay Protection!)
+    // Login Endpoint (constant-effort PBKDF2 + per-IP Brute-Force + TOTP 2FA Replay Protection)
     if (req.path == "/api/auth/login" && req.method == "POST") {
         if (login_bf_.is_blocked(req.remote_ip)) {
             json_err(resp, 429, "Too many failed login attempts. Locked out for 5 minutes.");
@@ -525,7 +613,9 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
         std::string otp   = body.get("otp_code").as_str();
 
         auto u = db_.get_user_by_name(uname);
-        if (!u || u->is_guest() || u->disabled || !verify_password_pbkdf2(pwd, u->password_hash)) {
+        bool account_valid = (u && !u->is_guest() && !u->disabled && !u->password_hash.empty());
+        bool pwd_ok = verify_password_pbkdf2(pwd, account_valid ? u->password_hash : dummy_pwd_hash_);
+        if (!account_valid || !pwd_ok) {
             login_bf_.record_failure(req.remote_ip);
             json_err(resp, 400, "Invalid username or password");
             return;
@@ -617,8 +707,8 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
     if (req.path == "/api/auth/2fa/generate" && req.method == "POST") {
         if (user.is_guest()) { json_err(resp, 403, "Forbidden"); return; }
         std::string sec = totp_generate_secret();
-        std::string uri = "otpauth://totp/AList%20%40nggkhaiz:" + url_encode(user.username) +
-                          "?secret=" + sec + "&issuer=nggkhaiz";
+        std::string uri = "otpauth://totp/Kova:" + url_encode(user.username) +
+                          "?secret=" + sec + "&issuer=Kova";
         json_ok(resp, JsonValue::object({{"secret", sec}, {"qr", uri}}));
         return;
     }
@@ -737,7 +827,7 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
         auto gvpath = vfs_.resolve_user_path(user, req_p);
         if (!gvpath) { json_err(resp, 403, "Invalid path"); return; }
 
-        auto gr = vfs_.get_obj(&user, *gvpath, pw, req.base_url());
+        auto gr = vfs_.get_obj(&user, *gvpath, pw, effective_base_url());
         if (!gr.ok) { json_err(resp, gr.http_status, gr.error); return; }
 
         JsonValue d = gr.entry.to_json();
@@ -819,13 +909,16 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
         auto body = parse_body_or_empty(req);
         auto gdir = vfs_.resolve_user_path(user, body.get("dir").as_str());
         if (!gdir) { json_err(resp, 400, "Invalid dir"); return; }
+        const auto& names = body.get("names").as_array();
+        if (names.size() > 500) { json_err(resp, 400, "A maximum of 500 items can be removed per request"); return; }
+        std::string pw = body.get("password").as_str(req.header("password"));
         std::string err;
-        for (const auto& nv : body.get("names").as_array()) {
+        for (const auto& nv : names) {
             std::string nm = nv.as_str();
             if (!is_valid_filename(nm)) continue;
             auto target = join_vpath(*gdir, nm);
             if (!target) continue;
-            if (!vfs_.can_write_path(user, *target, PermRemove, req.header("password"))) {
+            if (!vfs_.can_write_path(user, *target, PermRemove, pw)) {
                 json_err(resp, 403, "Remove permission denied on " + nm);
                 return;
             }
@@ -841,34 +934,41 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
         auto dst_dir = vfs_.resolve_user_path(user, body.get("dst_dir").as_str());
         if (!src_dir || !dst_dir) { json_err(resp, 400, "Invalid source or destination"); return; }
 
+        const auto& names = body.get("names").as_array();
+        if (names.size() > 100) { json_err(resp, 400, "A maximum of 100 items can be moved or copied per request"); return; }
+
+        std::string src_pw = body.get("password").as_str(req.header("password"));
+        std::string dst_pw = body.get("dst_password").as_str(src_pw);
         bool is_move = (req.path == "/api/fs/move");
         PermissionBit bit = is_move ? PermMove : PermCopy;
-        if (!vfs_.can_write_path(user, *dst_dir, bit) || !vfs_.is_path_in_role_scope(user, *dst_dir)) {
+        if (!vfs_.can_write_path(user, *dst_dir, bit, dst_pw) || !vfs_.is_path_in_role_scope(user, *dst_dir)) {
             json_err(resp, 403, "Destination permission denied");
             return;
         }
 
         std::string err;
         JsonValue task_ids = JsonValue::array();
-        for (const auto& nv : body.get("names").as_array()) {
+        for (const auto& nv : names) {
             std::string nm = nv.as_str();
             if (!is_valid_filename(nm)) continue;
             auto src_full = join_vpath(*src_dir, nm);
             if (!src_full) continue;
             if (is_move) {
-                if (!vfs_.can_write_path(user, *src_full, PermMove)) {
+                if (!vfs_.can_write_path(user, *src_full, PermMove, src_pw)) {
                     json_err(resp, 403, "Move permission denied");
                     return;
                 }
                 if (!vfs_.move_obj(*src_full, *dst_dir, err)) { json_err(resp, 500, err); return; }
             } else {
-                if (!vfs_.can_read_path(user, *src_full, "")) {
+                if (!vfs_.can_read_path(user, *src_full, src_pw)) {
                     json_err(resp, 403, "Read permission denied on source");
                     return;
                 }
                 bool async_task = body.get("as_task").as_bool(false);
                 if (async_task) {
-                    task_ids.push_back(tasks_.enqueue_copy(user.username, *src_full, *dst_dir));
+                    auto task_id = tasks_.enqueue_copy(user.username, *src_full, *dst_dir);
+                    if (task_id.empty()) { json_err(resp, 429, "Task queue is full; some earlier items may already have been queued"); return; }
+                    task_ids.push_back(std::move(task_id));
                 } else {
                     if (!vfs_.copy_obj_sync(*src_full, *dst_dir, err)) { json_err(resp, 500, err); return; }
                 }
@@ -890,6 +990,11 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
             json_err(resp, 403, "Upload permission denied");
             return;
         }
+        const int64_t upload_limit = std::max<int64_t>(0, cfg_.max_upload_bytes);
+        if (!req.is_chunked && req.content_length > upload_limit) {
+            json_err(resp, 413, "File exceeds max_upload_bytes limit", 413);
+            return;
+        }
 
         UploadStream up;
         up.filename = fname;
@@ -900,8 +1005,8 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
             if (!req.stream_body) return 0;
             ssize_t n = req.stream_body(buf, max_len);
             if (n > 0) {
+                if (total_read > upload_limit || n > upload_limit - total_read) return -1;
                 total_read += n;
-                if (total_read > cfg_.max_upload_bytes) return -1;
                 up_limiter_.consume(static_cast<size_t>(n));
             }
             return n;
@@ -917,20 +1022,25 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
 
     if (req.path == "/api/fs/add_offline_download" && req.method == "POST") {
         auto body = parse_body_or_empty(req);
+        std::string pw = body.get("password").as_str(req.header("password"));
         auto gdir = vfs_.resolve_user_path(user, body.get("path").as_str("/"));
-        if (!gdir || !vfs_.can_write_path(user, *gdir, PermAddOfflineDownload)) {
+        if (!gdir || !vfs_.can_write_path(user, *gdir, PermAddOfflineDownload, pw)) {
             json_err(resp, 403, "Offline download permission denied");
             return;
         }
+        const auto& urls = body.get("urls").as_array();
+        if (urls.size() > 100) { json_err(resp, 400, "A maximum of 100 offline downloads can be queued per request"); return; }
         JsonValue tids = JsonValue::array();
-        for (const auto& uv : body.get("urls").as_array()) {
+        for (const auto& uv : urls) {
             std::string u = uv.as_str();
             std::string verr;
             if (!validate_outbound_url(u, cfg_.allow_private_net_outbound, &verr)) {
                 json_err(resp, 400, verr);
                 return;
             }
-            tids.push_back(tasks_.enqueue_offline_download(user.username, std::move(u), *gdir));
+            auto task_id = tasks_.enqueue_offline_download(user.username, std::move(u), *gdir);
+            if (task_id.empty()) { json_err(resp, 429, "Task queue is full; some earlier URLs may already have been queued"); return; }
+            tids.push_back(std::move(task_id));
         }
         json_ok(resp, JsonValue::object({{"tasks", std::move(tids)}}));
         return;
@@ -977,10 +1087,12 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
 
     if (req.path == "/api/fs/archive/decompress" && req.method == "POST") {
         auto body = parse_body_or_empty(req);
+        std::string src_pw = body.get("password").as_str(req.header("password"));
+        std::string dst_pw = body.get("dst_password").as_str(src_pw);
         auto src_v = vfs_.resolve_user_path(user, body.get("src_path").as_str(body.get("path").as_str()));
         auto dst_v = vfs_.resolve_user_path(user, body.get("dst_dir").as_str());
         if (!src_v || !dst_v) { json_err(resp, 400, "Invalid paths"); return; }
-        if (!vfs_.can_write_path(user, *dst_v, PermDecompress) || !vfs_.can_read_path(user, *src_v, "")) {
+        if (!vfs_.can_write_path(user, *dst_v, PermDecompress, dst_pw) || !vfs_.can_read_path(user, *src_v, src_pw)) {
             json_err(resp, 403, "Decompress permission denied");
             return;
         }
@@ -1030,12 +1142,13 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
 
         if (req.path == "/api/share/create" && req.method == "POST") {
             auto body = parse_body_or_empty(req);
+            std::string meta_pw = body.get("dir_password").as_str(req.header("password"));
             auto gv = vfs_.resolve_user_path(user, body.get("path").as_str());
-            if (!gv || !vfs_.can_read_path(user, *gv, "")) {
+            if (!gv || !vfs_.can_read_path(user, *gv, meta_pw)) {
                 json_err(resp, 403, "Cannot share inaccessible path");
                 return;
             }
-            auto obj = vfs_.get_obj(&user, *gv, "", req.base_url());
+            auto obj = vfs_.get_obj(&user, *gv, meta_pw, effective_base_url());
             if (!obj.ok) { json_err(resp, 404, obj.error); return; }
 
             ShareRecord sh;
@@ -1046,9 +1159,10 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
             sh.is_dir = obj.entry.is_dir;
             std::string pw = body.get("password").as_str();
             if (!pw.empty()) sh.password_hash = hash_password_pbkdf2(pw);
-            int64_t exp_h = body.get("expires_hours").as_i64(0);
+            // Clamp expires_hours to [0, 87600] (10 years) to prevent signed integer overflow
+            int64_t exp_h = std::clamp<int64_t>(body.get("expires_hours").as_i64(0), 0, 87600);
             sh.expires_at = (exp_h > 0) ? (unix_now() + exp_h * 3600) : 0;
-            sh.max_downloads = std::max<int64_t>(0, body.get("max_downloads").as_i64(0));
+            sh.max_downloads = std::clamp<int64_t>(body.get("max_downloads").as_i64(0), 0, 1000000000LL);
 
             if (!db_.create_share(sh)) { json_err(resp, 500, "Failed creating share"); return; }
             json_ok(resp, JsonValue::object({{"share_id", sh.share_id}}));
@@ -1103,13 +1217,18 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
             return;
         }
         if (req.path == "/api/task/cancel" && req.method == "POST") {
-            tasks_.cancel_task(req.query_param("tid", parse_body_or_empty(req).get("tid").as_str()));
+            std::string tid = req.query_param("tid", parse_body_or_empty(req).get("tid").as_str());
+            std::string owner = user.is_admin() ? "" : user.username;
+            if (!tasks_.cancel_task(tid, owner)) {
+                json_err(resp, 404, "Task not found or access denied");
+                return;
+            }
             json_ok(resp);
             return;
         }
         if (req.path == "/api/task/clear_done" && req.method == "POST") {
-            if (!user.is_admin()) { json_err(resp, 403, "Admin required"); return; }
-            tasks_.clear_done_tasks(req.query_param("type"));
+            std::string owner = user.is_admin() ? "" : user.username;
+            tasks_.clear_done_tasks(req.query_param("type"), owner);
             json_ok(resp);
             return;
         }
@@ -1243,9 +1362,9 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
             auto b = parse_body_or_empty(req);
             StorageRecord s;
             s.mount_path       = b.get("mount_path").as_str();
-            s.order_idx        = static_cast<int>(b.get("order").as_i64(0));
+            s.order_idx        = bounded_json_int(b.get("order"), 0, -100000, 100000);
             s.driver           = b.get("driver").as_str();
-            s.cache_expiration = static_cast<int>(b.get("cache_expiration").as_i64(30));
+            s.cache_expiration = bounded_json_int(b.get("cache_expiration"), 30, 0, 525600);
             s.addition         = b.get("addition").is_object() ? b.get("addition").dump() : b.get("addition").as_str("{}");
             s.remark           = b.get("remark").as_str();
             s.enable_sign      = b.get("enable_sign").as_bool(false);
@@ -1267,9 +1386,9 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
             if (!existing) { json_err(resp, 404, "Storage not found"); return; }
             std::string old_mp = existing->mount_path;
             existing->mount_path       = b.get("mount_path").as_str(existing->mount_path);
-            existing->order_idx        = static_cast<int>(b.get("order").as_i64(existing->order_idx));
+            existing->order_idx        = bounded_json_int(b.get("order"), existing->order_idx, -100000, 100000);
             existing->driver           = b.get("driver").as_str(existing->driver);
-            existing->cache_expiration = static_cast<int>(b.get("cache_expiration").as_i64(existing->cache_expiration));
+            existing->cache_expiration = bounded_json_int(b.get("cache_expiration"), existing->cache_expiration, 0, 525600);
             existing->remark           = b.get("remark").as_str(existing->remark);
             existing->order_by         = b.get("order_by").as_str(existing->order_by);
             existing->order_direction  = b.get("order_direction").as_str(existing->order_direction);
@@ -1348,8 +1467,17 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
             int64_t id = b.get("id").as_i64(0);
             auto eu = db_.get_user_by_id(id);
             if (!eu) { json_err(resp, 404, "User not found"); return; }
+            bool next_disabled = b.get("disabled").as_bool(eu->disabled);
+            if (eu->is_admin() && next_disabled) {
+                json_err(resp, 400, "Cannot disable the administrator account");
+                return;
+            }
+            if (b.contains("password") && !b.get("password").as_sv().empty() && b.get("password").as_sv().size() < 6) {
+                json_err(resp, 400, "Password must be at least 6 characters");
+                return;
+            }
             eu->base_path = clean_vpath(b.get("base_path").as_sv(eu->base_path)).value_or("/");
-            eu->disabled  = b.get("disabled").as_bool(eu->disabled);
+            eu->disabled  = next_disabled;
             if (b.contains("role_ids") && b.get("role_ids").is_array()) {
                 eu->role_ids.clear();
                 for (const auto& rv : b.get("role_ids").as_array()) eu->role_ids.push_back(rv.as_i64(0));
@@ -1437,7 +1565,7 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
                 arr.push_back(JsonValue::object({
                     {"id", m.id}, {"path", m.path}, {"password", m.password.empty() ? "" : "********"},
                     {"p_sub", m.p_sub}, {"write", m.write}, {"w_sub", m.w_sub},
-                    {"hide", m.hide}, {"h_sub", m.h_sub}, {"readme", m.readme}
+                    {"hide", m.hide}, {"h_sub", m.h_sub}, {"readme", m.readme}, {"r_sub", m.r_sub}
                 }));
             }
             json_ok(resp, JsonValue::object({{"content", std::move(arr)}, {"total", static_cast<int64_t>(list.size())}}));
@@ -1456,7 +1584,8 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
             m.readme   = b.get("readme").as_str();
             m.r_sub    = b.get("r_sub").as_bool(false);
             int64_t id = db_.create_meta(m);
-            if (id <= 0) { json_err(resp, 400, "Failed creating meta"); return; }
+            if (id <= 0) { json_err(resp, 400, "Failed creating meta (invalid or duplicate path)"); return; }
+            vfs_.invalidate_cache(m.path);
             json_ok(resp, JsonValue::object({{"id", id}}));
             return;
         }
@@ -1465,6 +1594,7 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
             int64_t id = b.get("id").as_i64(0);
             auto ex = db_.get_meta(id);
             if (!ex) { json_err(resp, 404, "Meta rule not found"); return; }
+            std::string old_path = ex->path;
             ex->path = b.get("path").as_str(ex->path);
             if (b.contains("password")) {
                 std::string np = b.get("password").as_str();
@@ -1478,12 +1608,16 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
             ex->readme = b.get("readme").as_str(ex->readme);
             ex->r_sub  = b.get("r_sub").as_bool(ex->r_sub);
             if (!db_.update_meta(*ex)) { json_err(resp, 400, "Failed updating meta"); return; }
+            vfs_.invalidate_cache(old_path);
+            vfs_.invalidate_cache(ex->path);
             json_ok(resp);
             return;
         }
         if (req.path == "/api/admin/meta/delete" && req.method == "POST") {
             int64_t id = parse_i64(req.query_param("id")).value_or(parse_body_or_empty(req).get("id").as_i64(0));
+            auto ex = db_.get_meta(id);
             db_.delete_meta(id);
+            if (ex) vfs_.invalidate_cache(ex->path);
             json_ok(resp);
             return;
         }
@@ -1502,19 +1636,30 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
             auto b = parse_body_or_empty(req);
             if (b.is_array()) {
                 for (const auto& item : b.as_array()) {
-                    std::string k = item.get("key").as_str();
+                    std::string k = std::string(trim_ascii(item.get("key").as_sv()));
                     std::string v = item.get("value").as_str();
-                    if (!k.empty() && k != "token") {
-                        bool is_pub = (k == "site_title" || k == "announcement" || k == "pagination_type" || k == "default_page_size");
-                        db_.set_setting(k, v, "site", is_pub);
+                    if (k.empty() || k.size() > 64 || v.size() > 16384 || k == "token" || k == "version") continue;
+                    // Clamp numeric settings to safe operational ranges
+                    if (k == "default_page_size") {
+                        v = std::to_string(std::clamp<int64_t>(parse_i64(v).value_or(50), 10, 500));
+                    } else if (k == "link_expiration") {
+                        v = std::to_string(std::clamp<int64_t>(parse_i64(v).value_or(0), 0, 87600));
+                    } else if (k == "max_devices") {
+                        v = std::to_string(std::clamp<int64_t>(parse_i64(v).value_or(0), 0, 1000));
+                    } else if (k == "device_session_ttl") {
+                        v = std::to_string(std::clamp<int64_t>(parse_i64(v).value_or(86400), 60, 31536000));
                     }
+                    bool is_pub = (k == "site_title" || k == "announcement" || k == "pagination_type" ||
+                                   k == "default_page_size" || k == "allow_indexed" || k == "allow_mounted" ||
+                                   k == "robots_txt" || k == "search_index" || k == "enable_search");
+                    db_.set_setting(k, v, is_pub ? "site" : "global", is_pub);
                 }
             }
             json_ok(resp);
             return;
         }
         if (req.path == "/api/admin/setting/reset_token" && req.method == "POST") {
-            std::string nt = "nggkhaiz-" + random_hex(24);
+            std::string nt = "kova-" + random_hex(24);
             db_.set_setting("token", nt, "global", false);
             json_ok(resp, JsonValue::object({{"token", nt}}));
             return;

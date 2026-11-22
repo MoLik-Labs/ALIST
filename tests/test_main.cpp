@@ -15,6 +15,7 @@
 #include "c_libs.hpp"
 
 #include <arpa/inet.h>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -193,7 +194,39 @@ RawHttpReply raw_http_call(int port, std::string_view raw_request) {
 }
 
 // ============================================================================
-// 1. Path Normalization, Traversal & Symlink Confinement Tests
+// 1. Sharded Cache Semantics & Concurrent Statistics
+// ============================================================================
+void test_sharded_cache_concurrency() {
+    ShardedLruCache<int> cache(64);
+    cache.put("warm", 7, std::chrono::seconds(60));
+    CHECK(cache.get("warm") == std::optional<int>{7});
+    CHECK(!cache.get("missing").has_value());
+    CHECK(cache.hits() == 1);
+    CHECK(cache.misses() == 1);
+
+    constexpr int kThreads = 4;
+    constexpr int kReadsPerThread = 2000;
+    const std::array<std::string, kThreads> keys{"cache-key-a", "cache-key-b", "cache-key-c", "cache-key-d"};
+    for (int i = 0; i < kThreads; ++i) cache.put(keys[static_cast<size_t>(i)], i, std::chrono::seconds(60));
+    std::atomic<int> successful_reads{0};
+    std::vector<std::thread> readers;
+    for (int i = 0; i < kThreads; ++i) {
+        readers.emplace_back([&, i] {
+            for (int n = 0; n < kReadsPerThread; ++n) {
+                if (cache.get(keys[static_cast<size_t>(i)]).has_value()) {
+                    successful_reads.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+    for (auto& reader : readers) reader.join();
+    CHECK(successful_reads.load(std::memory_order_relaxed) == kThreads * kReadsPerThread);
+    CHECK(cache.hits() == 1 + kThreads * kReadsPerThread);
+    CHECK(cache.misses() == 1);
+}
+
+// ============================================================================
+// 2. Path Normalization, Traversal & Symlink Confinement Tests
 // ============================================================================
 void test_vpath_and_symlink_security() {
     CHECK(clean_vpath("/a/b/../c//d/.").value() == "/a/c/d");
@@ -239,7 +272,7 @@ void test_vpath_and_symlink_security() {
 }
 
 // ============================================================================
-// 2. Cryptography, JWT Algorithm Pinning, Vault & TOTP Replay Protection
+// 3. Cryptography, JWT Algorithm Pinning, Vault & TOTP Replay Protection
 // ============================================================================
 void test_crypto_jwt_and_totp_security() {
     auto key = derive_key_sha256("master-secret-test", "domain-v1");
@@ -298,7 +331,7 @@ void test_crypto_jwt_and_totp_security() {
 }
 
 // ============================================================================
-// 3. SSRF Protection & Linear-Time Anti-ReDoS Glob Matcher
+// 4. SSRF Protection & Linear-Time Anti-ReDoS Glob Matcher
 // ============================================================================
 void test_ssrf_and_antiredos_glob() {
     CHECK(!validate_outbound_url("http://127.0.0.1:8080/admin", false));
@@ -327,7 +360,7 @@ void test_ssrf_and_antiredos_glob() {
 }
 
 // ============================================================================
-// 4. Bounded JSON & XML Parser Security Tests
+// 5. Bounded JSON & XML Parser Security Tests
 // ============================================================================
 void test_json_and_xml_bounds() {
     std::string deep_json(100, '[');
@@ -346,10 +379,20 @@ void test_json_and_xml_bounds() {
     std::string valid_xml = R"(<?xml version="1.0"?><D:propfind xmlns:D="DAV:"><D:allprop/></D:propfind>)";
     auto xr = parse_xml(valid_xml);
     CHECK(xr.has_value() && xr->local_name() == "propfind");
+
+    CHECK(accepts_gzip_encoding("gzip"));
+    CHECK(accepts_gzip_encoding("br, gzip;q=0.8"));
+    CHECK(accepts_gzip_encoding("br, *;q=1"));
+    CHECK(!accepts_gzip_encoding("gzip;q=0"));
+    CHECK(!accepts_gzip_encoding("gzip;q=0, *;q=1"));
+    CHECK(!accepts_gzip_encoding("GZIP; q=invalid"));
+    CHECK(!accepts_gzip_encoding("gzip;q=0.000"));
+    CHECK(accepts_gzip_encoding("GZip; Q=1.000"));
+    CHECK(!accepts_gzip_encoding("br, deflate"));
 }
 
 // ============================================================================
-// 5. Database At-Rest Encryption, TOTP Replay DB Guard & FTS5 Search
+// 6. Database At-Rest Encryption, TOTP Replay DB Guard & FTS5 Search
 // ============================================================================
 void test_database_vault_and_fts5() {
     std::string dir = "/tmp/alist_db_test_" + random_hex(6);
@@ -405,11 +448,19 @@ void test_database_vault_and_fts5() {
 }
 
 // ============================================================================
-// 6. VFS Engine, Crypt Streaming AES-256-GCM Seek & Alias Loop Guard
+// 7. VFS Engine, Crypt Streaming AES-256-GCM Seek & Alias Loop Guard
 // ============================================================================
 void test_vfs_crypt_driver_and_loop_guard() {
     std::string dir = "/tmp/alist_vfs_test_" + random_hex(6);
     std::filesystem::create_directories(dir + "/backing/enc_store");
+    std::filesystem::create_directories(dir + "/backing/nested_mount");
+    std::filesystem::create_directories(dir + "/nested_override");
+    std::filesystem::create_directories(dir + "/balance_primary");
+    std::filesystem::create_directories(dir + "/balance_replica");
+    { std::ofstream f(dir + "/backing/nested_mount/parent_only.txt"); f << "parent"; }
+    { std::ofstream f(dir + "/nested_override/nested_only.txt"); f << "nested"; }
+    { std::ofstream f(dir + "/balance_primary/primary.txt"); f << "primary"; }
+    { std::ofstream f(dir + "/balance_replica/replica.txt"); f << "replica"; }
     ScopeExit cleanup([&] {
         std::error_code ec;
         std::filesystem::remove_all(dir, ec);
@@ -426,6 +477,35 @@ void test_vfs_crypt_driver_and_loop_guard() {
     s_local.driver = "Local";
     s_local.addition = JsonValue::object({{"root_folder_path", dir + "/backing"}}).dump();
     CHECK(vfs.reload_storage(db.create_storage(s_local)));
+
+    // Deepest mount wins while ordinary paths remain attached to the parent mount.
+    StorageRecord s_nested;
+    s_nested.mount_path = "/local/nested_mount";
+    s_nested.driver = "Local";
+    s_nested.addition = JsonValue::object({{"root_folder_path", dir + "/nested_override"}}).dump();
+    CHECK(vfs.reload_storage(db.create_storage(s_nested)));
+    auto nested_listing = vfs.list_dir(nullptr, "/local/nested_mount", "", true);
+    CHECK(nested_listing.ok && nested_listing.entries.size() == 1);
+    CHECK(nested_listing.entries[0].name == "nested_only.txt");
+    auto parent_listing = vfs.list_dir(nullptr, "/local", "", true);
+    CHECK(parent_listing.ok && std::any_of(parent_listing.entries.begin(), parent_listing.entries.end(),
+                                           [](const FileObj& f) { return f.name == "nested_mount" && f.is_dir; }));
+
+    // .balance replicas keep deterministic round-robin selection after indexed lookup.
+    StorageRecord s_balance;
+    s_balance.mount_path = "/balanced";
+    s_balance.driver = "Local";
+    s_balance.addition = JsonValue::object({{"root_folder_path", dir + "/balance_primary"}}).dump();
+    CHECK(vfs.reload_storage(db.create_storage(s_balance)));
+    StorageRecord s_balance_replica;
+    s_balance_replica.mount_path = "/balanced.balance01";
+    s_balance_replica.driver = "Local";
+    s_balance_replica.addition = JsonValue::object({{"root_folder_path", dir + "/balance_replica"}}).dump();
+    CHECK(vfs.reload_storage(db.create_storage(s_balance_replica)));
+    auto primary_listing = vfs.list_dir(nullptr, "/balanced", "", true);
+    auto replica_listing = vfs.list_dir(nullptr, "/balanced", "", true);
+    CHECK(primary_listing.ok && primary_listing.entries.size() == 1 && primary_listing.entries[0].name == "primary.txt");
+    CHECK(replica_listing.ok && replica_listing.entries.size() == 1 && replica_listing.entries[0].name == "replica.txt");
 
     StorageRecord s_crypt;
     s_crypt.mount_path = "/vault";
@@ -526,7 +606,7 @@ void test_vfs_crypt_driver_and_loop_guard() {
 }
 
 // ============================================================================
-// 7. ZIP Archive Extraction, Zip-Slip & Corrupted CRC-32 Defense
+// 8. ZIP Archive Extraction, Zip-Slip & Corrupted CRC-32 Defense
 // ============================================================================
 void test_zip_archive_security() {
     std::string dir = "/tmp/alist_zip_test_" + random_hex(6);
@@ -536,7 +616,7 @@ void test_zip_archive_security() {
         std::filesystem::remove_all(dir, ec);
     });
 
-    std::string good_zip = build_test_zip("docs/hello.txt", "Hello from AList-Core ZIP Engine!");
+    std::string good_zip = build_test_zip("docs/hello.txt", "Hello from Kova Native ZIP Engine!");
     std::string good_path = dir + "/good.zip";
     { std::ofstream f(good_path, std::ios::binary); f << good_zip; }
 
@@ -545,7 +625,7 @@ void test_zip_archive_security() {
     CHECK(zip_list_entries(good_path, entries, err));
     CHECK(entries.size() == 1 && entries[0].path == "docs/hello.txt");
     auto ext = zip_extract_entry(good_path, "docs/hello.txt", err);
-    CHECK(ext.has_value() && *ext == "Hello from AList-Core ZIP Engine!");
+    CHECK(ext.has_value() && *ext == "Hello from Kova Native ZIP Engine!");
     CHECK(zip_decompress_to_dir(good_path, dir + "/out", err));
     CHECK(std::filesystem::exists(dir + "/out/docs/hello.txt"));
 
@@ -561,10 +641,24 @@ void test_zip_archive_security() {
     std::string bad_crc_path = dir + "/badcrc.zip";
     { std::ofstream f(bad_crc_path, std::ios::binary); f << bad_crc_zip; }
     CHECK(!zip_extract_entry(bad_crc_path, "a.txt", err).has_value());
+
+    // EOCD entry-count mismatch and compressed expansion bombs fail closed.
+    std::string bad_count_zip = good_zip;
+    const size_t eocd = bad_count_zip.rfind(std::string("PK\x05\x06", 4));
+    CHECK(eocd != std::string::npos);
+    bad_count_zip[eocd + 10] = 2;
+    std::string bad_count_path = dir + "/badcount.zip";
+    { std::ofstream f(bad_count_path, std::ios::binary); f << bad_count_zip; }
+    CHECK(!zip_list_entries(bad_count_path, entries, err));
+
+    std::string bomb_zip = build_test_zip("large.txt", std::string(2 * 1024 * 1024, 'A'));
+    std::string bomb_path = dir + "/bomb.zip";
+    { std::ofstream f(bomb_path, std::ios::binary); f << bomb_zip; }
+    CHECK(!zip_extract_entry(bomb_path, "large.txt", err).has_value());
 }
 
 // ============================================================================
-// 8. End-to-End Live HTTP Server + API + RBAC + WebDAV + Concurrency Hammer
+// 9. End-to-End Live HTTP Server + API + RBAC + WebDAV + Concurrency Hammer
 // ============================================================================
 void test_live_http_api_webdav_and_concurrency() {
     std::string dir = "/tmp/alist_e2e_test_" + random_hex(6);
@@ -613,6 +707,162 @@ void test_live_http_api_webdav_and_concurrency() {
     int port = server.bound_port();
     CHECK(port > 0);
 
+    // The active + queued connection cap must be strict while a worker is taking
+    // a connection out of the accept queue.
+    std::atomic<bool> limit_handler_entered{false};
+    std::atomic<bool> release_limit_handler{false};
+    HttpServer limit_server("127.0.0.1", 0, 2, 1);
+    limit_server.set_handler([&](HttpRequest&, HttpResponse& resp) {
+        limit_handler_entered.store(true, std::memory_order_release);
+        while (!release_limit_handler.load(std::memory_order_acquire)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        resp.body = "held";
+    });
+    CHECK(limit_server.start());
+    int limit_port = limit_server.bound_port();
+    CHECK(limit_port > 0);
+    int held_fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    CHECK(held_fd >= 0);
+    sockaddr_in held_addr{};
+    held_addr.sin_family = AF_INET;
+    held_addr.sin_port = htons(static_cast<uint16_t>(limit_port));
+    ::inet_pton(AF_INET, "127.0.0.1", &held_addr.sin_addr);
+    CHECK(::connect(held_fd, reinterpret_cast<sockaddr*>(&held_addr), sizeof(held_addr)) == 0);
+    const std::string held_request = "GET /hold HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\n\r\n";
+    CHECK(::send(held_fd, held_request.data(), held_request.size(), MSG_NOSIGNAL) == static_cast<ssize_t>(held_request.size()));
+    for (int attempt = 0; attempt < 2000 && !limit_handler_entered.load(std::memory_order_acquire); ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(limit_handler_entered.load(std::memory_order_acquire));
+    auto overloaded = raw_http_call(limit_port,
+        "GET /ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    CHECK(overloaded.status == 503);
+    release_limit_handler.store(true, std::memory_order_release);
+    ::shutdown(held_fd, SHUT_RDWR);
+    ::close(held_fd);
+    limit_server.stop();
+
+    // Hop-by-hop redirect validation must strip custom credentials across origins,
+    // retain them on same-origin redirects, and never replay request bodies.
+    int redirect_port = 0;
+    std::atomic<int> redirect_targets_hit{0};
+    std::atomic<int> slow_stream_chunks{0};
+    HttpServer redirect_server("0.0.0.0", 0, 2, 32);
+    redirect_server.set_handler([&](HttpRequest& req, HttpResponse& resp) {
+        if (req.path == "/query-check") {
+            const auto& q = req.query_params;
+            auto matches = [&](const char* key, const char* value) {
+                auto it = q.find(key);
+                return it != q.end() && it->second == value;
+            };
+            resp.body = q.size() == 5 && matches("a", "last") && matches("sp ace", "+") &&
+                        matches("empty", "") && matches("", "value") && matches("plain", "") &&
+                        q.find("bad") == q.end() ? "ok" : "bad";
+            return;
+        }
+        if (req.path == "/redirect-cross") {
+            resp.redirect(302, "http://127.0.0.2:" + std::to_string(redirect_port) + "/target");
+            return;
+        }
+        if (req.path == "/redirect-same") {
+            resp.redirect(302, "http://127.0.0.1:" + std::to_string(redirect_port) + "/target");
+            return;
+        }
+        if (req.path == "/post-redirect") {
+            resp.redirect(307, "http://127.0.0.2:" + std::to_string(redirect_port) + "/target");
+            return;
+        }
+        if (req.path == "/slow") {
+            resp.headers["Content-Type"] = "application/octet-stream";
+            resp.stream_content_length = -1;
+            resp.stream_writer = [&](const std::function<bool(const char*, size_t)>& sink) {
+                static const std::string chunk(64 * 1024, 'x');
+                for (int i = 0; i < 256; ++i) {
+                    if (!sink(chunk.data(), chunk.size())) return false;
+                    slow_stream_chunks.fetch_add(1, std::memory_order_relaxed);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                }
+                return true;
+            };
+            return;
+        }
+        if (req.path == "/target") redirect_targets_hit.fetch_add(1, std::memory_order_relaxed);
+        resp.headers["Content-Type"] = "text/plain; charset=utf-8";
+        resp.body = req.header("x-api-key", "missing");
+    });
+    CHECK(redirect_server.start());
+    redirect_port = redirect_server.bound_port();
+    CHECK(redirect_port > 0);
+    ScopeExit stop_redirect([&] { redirect_server.stop(); });
+
+    // Empty segments are ignored, invalid escapes are skipped, and later keys win.
+    auto query_response = raw_http_call(redirect_port,
+        "GET /query-check?&&a=first&sp+ace=%2B&empty=&=value&plain&bad=%00&a=last&& HTTP/1.1\r\n"
+        "Host: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    CHECK(query_response.status == 200 && query_response.body == "ok");
+
+    OutboundRequest cross_redirect;
+    cross_redirect.url = "http://127.0.0.1:" + std::to_string(redirect_port) + "/redirect-cross";
+    cross_redirect.follow_redirects = true;
+    cross_redirect.allow_private_net = true;
+    cross_redirect.headers["X-Api-Key"] = "secret-api-key";
+    cross_redirect.headers["Authorization"] = "Bearer secret-token";
+    auto cross_response = HttpClient::instance().perform(cross_redirect);
+    CHECK(cross_response.ok && cross_response.status_code == 200 && cross_response.body == "missing");
+
+    OutboundRequest same_redirect = cross_redirect;
+    same_redirect.url = "http://127.0.0.1:" + std::to_string(redirect_port) + "/redirect-same";
+    auto same_response = HttpClient::instance().perform(same_redirect);
+    CHECK(same_response.ok && same_response.status_code == 200 && same_response.body == "secret-api-key");
+
+    OutboundRequest post_redirect;
+    post_redirect.method = "POST";
+    post_redirect.url = "http://127.0.0.1:" + std::to_string(redirect_port) + "/post-redirect";
+    post_redirect.body = "do-not-replay";
+    post_redirect.follow_redirects = true;
+    post_redirect.allow_private_net = true;
+    auto post_response = HttpClient::instance().perform(post_redirect);
+    CHECK(post_response.ok && post_response.status_code == 307);
+    CHECK(redirect_targets_hit.load(std::memory_order_relaxed) == 2);
+
+    // A running outbound task must observe cancellation during TaskManager shutdown
+    // rather than keeping graceful server teardown blocked until its network timeout.
+    AppConfig task_cfg = cfg;
+    task_cfg.allow_private_net_outbound = true;
+    task_cfg.temp_dir = dir + "/task-temp";
+    std::filesystem::create_directories(task_cfg.temp_dir);
+    ScopeExit cleanup_task_temp([&] {
+        std::error_code ec;
+        std::filesystem::remove_all(task_cfg.temp_dir, ec);
+    });
+    VfsEngine task_vfs(db, task_cfg);
+    task_vfs.reload_all_storages();
+    auto shutdown_started = std::chrono::steady_clock::now();
+    {
+        TaskManager cancel_on_shutdown(task_vfs, 1);
+        std::string task_id = cancel_on_shutdown.enqueue_offline_download(
+            "shutdown-test", "http://127.0.0.1:" + std::to_string(redirect_port) + "/slow", "/local");
+        CHECK(!task_id.empty());
+        bool request_started = false;
+        for (int attempt = 0; attempt < 3000 && !request_started; ++attempt) {
+            for (const auto& task : cancel_on_shutdown.list_tasks("", false)) {
+                if (task.id == task_id && task.state == "running" &&
+                    slow_stream_chunks.load(std::memory_order_relaxed) > 0) {
+                    request_started = true;
+                    break;
+                }
+            }
+            if (!request_started) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        CHECK(request_started);
+        shutdown_started = std::chrono::steady_clock::now();
+    }
+    const auto shutdown_duration = std::chrono::steady_clock::now() - shutdown_started;
+    CHECK(shutdown_duration < std::chrono::seconds(2));
+    CHECK(slow_stream_chunks.load(std::memory_order_relaxed) < 256);
+    CHECK(std::filesystem::is_empty(task_cfg.temp_dir));
+
     ScopeExit stop_srv([&] {
         server.stop();
         db.close();
@@ -648,8 +898,27 @@ void test_live_http_api_webdav_and_concurrency() {
     auto ping = raw_http_call(port, "GET /ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
     CHECK(ping.status == 200 && ping.body == "pong");
 
-    auto spa = raw_http_call(port, "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept-Encoding: gzip\r\nConnection: close\r\n\r\n");
+    auto spa = raw_http_call(port, "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: https://preview.example\r\nAccept-Encoding: gzip\r\nConnection: close\r\n\r\n");
     CHECK(spa.status == 200 && spa.headers["content-encoding"] == "gzip");
+    CHECK(spa.headers["etag"].size() == 26 && spa.headers["etag"].front() == '\"');
+    CHECK(spa.headers["vary"].find("Origin") != std::string::npos &&
+          spa.headers["vary"].find("Accept-Encoding") != std::string::npos);
+    CHECK(spa.headers["content-security-policy"].find("script-src 'self' 'sha256-") != std::string::npos);
+    CHECK(spa.headers["content-security-policy"].find("script-src 'self' 'unsafe-inline'") == std::string::npos);
+    CHECK(spa.headers["content-security-policy"].find("frame-ancestors 'self'") != std::string::npos);
+
+    auto spa_identity = raw_http_call(port,
+        "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept-Encoding: gzip;q=0, *;q=1\r\nConnection: close\r\n\r\n");
+    CHECK(spa_identity.status == 200 && !spa_identity.headers.contains("content-encoding"));
+    CHECK(spa_identity.headers["etag"] != spa.headers["etag"]);
+    auto spa_304 = raw_http_call(port,
+        "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept-Encoding: gzip;q=0\r\nIf-None-Match: " +
+        spa_identity.headers["etag"] + "\r\nConnection: close\r\n\r\n");
+    CHECK(spa_304.status == 304 && spa_304.body.empty());
+    auto mismatched_spa_etag = raw_http_call(port,
+        "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept-Encoding: gzip;q=0\r\nIf-None-Match: " +
+        spa.headers["etag"] + "\r\nConnection: close\r\n\r\n");
+    CHECK(mismatched_spa_etag.status == 200);
 
     // C. Guest Disabled by Default -> /api/fs/list & /d/* MUST reject unauthenticated access!
     auto unauth_ls = raw_http_call(port, "POST /api/fs/list HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 12\r\nConnection: close\r\n\r\n{\"path\":\"/\"}");
@@ -719,6 +988,11 @@ void test_live_http_api_webdav_and_concurrency() {
         "GET /d/local/alice_home/xss.html HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + alice_jwt +
         "\r\nRange: bytes=0-7\r\nConnection: close\r\n\r\n");
     CHECK(range_dl.status == 206 && range_dl.body == "<script>");
+    auto range_not_modified = raw_http_call(port,
+        "GET /d/local/alice_home/xss.html HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + alice_jwt +
+        "\r\nRange: bytes=0-7\r\nIf-None-Match: " + xss_dl.headers["etag"] +
+        "\r\nConnection: close\r\n\r\n");
+    CHECK(range_not_modified.status == 304 && range_not_modified.body.empty());
 
     auto bad_range = raw_http_call(port,
         "GET /d/local/alice_home/xss.html HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + alice_jwt +
@@ -745,6 +1019,52 @@ void test_live_http_api_webdav_and_concurrency() {
     CHECK(raw_http_call(port, "GET /sd/" + share_id + "?token=" + url_encode(sh_tok) + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n").status == 200);
     CHECK(raw_http_call(port, "GET /sd/" + share_id + "?token=" + url_encode(sh_tok) + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n").status == 200);
     CHECK(raw_http_call(port, "GET /sd/" + share_id + "?token=" + url_encode(sh_tok) + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n").status == 403);
+    auto range_quota_bypass = raw_http_call(port,
+        "GET /sd/" + share_id + "?token=" + url_encode(sh_tok) + " HTTP/1.1\r\nHost: 127.0.0.1\r\nRange: bytes=1-\r\nConnection: close\r\n\r\n");
+    CHECK(range_quota_bypass.status == 403);
+
+    std::string hidden_share_req = R"({"path":"/local/alice_home/xss.html"})";
+    auto hidden_share_create = raw_http_call(port,
+        "POST /api/share/create HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + admin_jwt +
+        "\r\nContent-Length: " + std::to_string(hidden_share_req.size()) + "\r\nConnection: close\r\n\r\n" + hidden_share_req);
+    auto hidden_share_json = JsonValue::parse(hidden_share_create.body);
+    CHECK(hidden_share_json && hidden_share_json->get("code").as_i64() == 200);
+    std::string hidden_share_id = hidden_share_json->get("data").get("share_id").as_str();
+    CHECK(!hidden_share_id.empty());
+    std::string hidden_folder_req = R"({"path":"/local/alice_home"})";
+    auto hidden_folder_create = raw_http_call(port,
+        "POST /api/share/create HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + admin_jwt +
+        "\r\nContent-Length: " + std::to_string(hidden_folder_req.size()) + "\r\nConnection: close\r\n\r\n" + hidden_folder_req);
+    auto hidden_folder_json = JsonValue::parse(hidden_folder_create.body);
+    CHECK(hidden_folder_json && hidden_folder_json->get("code").as_i64() == 200);
+    std::string hidden_folder_id = hidden_folder_json->get("data").get("share_id").as_str();
+    CHECK(!hidden_folder_id.empty());
+
+    MetaRecord hidden_meta;
+    hidden_meta.path = "/local/alice_home";
+    hidden_meta.hide = "xss.html";
+    CHECK(db.create_meta(hidden_meta) > 0);
+    MetaRecord hidden_parent;
+    hidden_parent.path = "/local";
+    hidden_parent.hide = "alice_home";
+    CHECK(db.create_meta(hidden_parent) > 0);
+    auto hidden_share_read = raw_http_call(port,
+        "GET /sd/" + hidden_share_id + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    CHECK(hidden_share_read.status == 404);
+    auto hidden_share_info = raw_http_call(port,
+        "GET /api/public/share/info?share_id=" + hidden_share_id + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    auto hidden_share_info_json = JsonValue::parse(hidden_share_info.body);
+    CHECK(hidden_share_info_json && hidden_share_info_json->get("code").as_i64() == 404);
+    std::string hidden_list_body = JsonValue::object({{"share_id", hidden_folder_id}, {"path", "/"}}).dump();
+    auto hidden_folder_list = raw_http_call(port,
+        "POST /api/public/share/list HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: " +
+        std::to_string(hidden_list_body.size()) + "\r\nConnection: close\r\n\r\n" + hidden_list_body);
+    auto hidden_folder_list_json = JsonValue::parse(hidden_folder_list.body);
+    CHECK(hidden_folder_list_json && hidden_folder_list_json->get("code").as_i64() == 404);
+    auto hidden_folder_info = raw_http_call(port,
+        "GET /api/public/share/info?share_id=" + hidden_folder_id + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    auto hidden_folder_info_json = JsonValue::parse(hidden_folder_info.body);
+    CHECK(hidden_folder_info_json && hidden_folder_info_json->get("code").as_i64() == 404);
 
     // H. RFC 4918 WebDAV (PROPFIND, MKCOL, Streaming PUT, GET)
     std::string basic_admin = "Basic " + base64_encode("admin:AdminPass#2026");
@@ -814,7 +1134,8 @@ void test_live_http_api_webdav_and_concurrency() {
 
 int main() {
     std::signal(SIGPIPE, SIG_IGN);
-    std::printf("\n=== AList-Core Standalone Security, Logic & Concurrency Suite ===\n");
+    std::printf("\n=== Kova Native Standalone Security, Logic & Concurrency Suite ===\n");
+    RUN_TEST(test_sharded_cache_concurrency);
     RUN_TEST(test_vpath_and_symlink_security);
     RUN_TEST(test_crypto_jwt_and_totp_security);
     RUN_TEST(test_ssrf_and_antiredos_glob);

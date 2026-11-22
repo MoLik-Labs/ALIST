@@ -61,7 +61,7 @@ VfsEngine::VfsEngine(Database& db, const AppConfig& cfg) : db_(db), cfg_(cfg) {}
 
 void VfsEngine::reload_all_storages() {
     auto records = db_.list_storages(true);
-    std::map<std::string, std::shared_ptr<MountedStorage>> fresh;
+    std::map<std::string, std::shared_ptr<MountedStorage>, std::less<>> fresh;
     for (auto& rec : records) {
         auto drv = create_driver_instance(rec.driver);
         if (!drv) {
@@ -143,48 +143,67 @@ void VfsEngine::invalidate_cache(std::string_view global_vpath) {
     list_cache_.erase(par);
 }
 
-std::optional<VfsEngine::MountMatch> VfsEngine::match_mount(std::string_view global_vpath) {
-    auto clean = clean_vpath(global_vpath).value_or("/");
+std::optional<VfsEngine::MountMatch> VfsEngine::match_mount(std::string_view clean) {
     std::shared_lock<std::shared_mutex> lk(mounts_mu_);
 
+    // Mount paths are canonical, so probe only path ancestors from deepest to root.
+    // This replaces two full scans of the mount table with O(path-depth * log mounts)
+    // lookups, which matters when an installation has many mounted backends.
+    std::string_view probe = clean;
     std::shared_ptr<MountedStorage> best;
-    for (const auto& [mp, ms] : mounts_) {
-        if (mp.find(".balance") != std::string::npos) continue;
-        if (is_subpath(mp, clean)) {
-            if (!best || mp.size() > best->record.mount_path.size()) {
-                best = ms;
-            }
+    while (true) {
+        auto it = mounts_.find(probe);
+        if (it != mounts_.end() && it->first.find(".balance") == std::string::npos) {
+            best = it->second;
+            break;
         }
+        if (probe == "/") break;
+        const size_t slash = probe.rfind('/');
+        probe = probe.substr(0, slash == 0 ? 1 : slash);
     }
     if (!best) return std::nullopt;
 
-    // Collect any .balance replicas for round-robin load distribution!
-    std::vector<std::shared_ptr<MountedStorage>> candidates = {best};
-    for (const auto& [mp, ms] : mounts_) {
-        if (is_balance_variant_of(mp, best->record.mount_path)) {
-            candidates.push_back(ms);
-        }
+    const std::string& primary_path = best->record.mount_path;
+    std::string sub = relative_subpath(primary_path, clean);
+
+    // Replicas are a contiguous lexical range in the ordered mount map. Avoid
+    // allocating a candidate vector or scanning unrelated mounts in the common case.
+    const std::string balance_prefix = primary_path + ".balance";
+    std::vector<std::shared_ptr<MountedStorage>> replicas;
+    for (auto it = mounts_.lower_bound(balance_prefix);
+         it != mounts_.end() && it->first.starts_with(balance_prefix); ++it) {
+        if (is_balance_variant_of(it->first, primary_path)) replicas.push_back(it->second);
     }
-    std::string sub = relative_subpath(best->record.mount_path, clean);
-    if (candidates.size() > 1) {
-        uint64_t idx = balance_rr_.fetch_add(1, std::memory_order_relaxed) % candidates.size();
-        return MountMatch{candidates[idx], std::move(sub)};
-    }
-    return MountMatch{best, std::move(sub)};
+    if (replicas.empty()) return MountMatch{std::move(best), std::move(sub)};
+
+    const size_t selected = balance_rr_.fetch_add(1, std::memory_order_relaxed) % (replicas.size() + 1);
+    if (selected == 0) return MountMatch{std::move(best), std::move(sub)};
+    return MountMatch{std::move(replicas[selected - 1]), std::move(sub)};
 }
 
 std::vector<std::string> VfsEngine::list_virtual_children(std::string_view global_vpath) {
     auto clean = clean_vpath(global_vpath).value_or("/");
     std::set<std::string> names;
     std::shared_lock<std::shared_mutex> lk(mounts_mu_);
-    for (const auto& [mp, _] : mounts_) {
-        if (mp.find(".balance") != std::string::npos) continue;
-        if (mp == clean || !is_subpath(clean, mp)) continue;
-        std::string rel = relative_subpath(clean, mp); // starts with '/'
-        auto segs = split_sv(rel, '/', true);
-        if (!segs.empty()) {
-            names.emplace(segs.front());
-        }
+
+    // For non-root paths, all possible virtual children form one lexical range.
+    // The root still visits every mount because every mount can add a root child.
+    std::string prefix;
+    auto it = mounts_.begin();
+    if (clean != "/") {
+        prefix = clean + "/";
+        it = mounts_.lower_bound(prefix);
+    }
+    for (; it != mounts_.end(); ++it) {
+        const std::string& mp = it->first;
+        if (clean != "/" && !mp.starts_with(prefix)) break;
+        if (mp.find(".balance") != std::string::npos || mp == clean) continue;
+
+        const size_t rel_start = clean == "/" ? 1 : prefix.size();
+        if (rel_start >= mp.size()) continue;
+        const std::string_view rel(mp.data() + rel_start, mp.size() - rel_start);
+        const size_t slash = rel.find('/');
+        names.emplace(rel.substr(0, slash));
     }
     return std::vector<std::string>(names.begin(), names.end());
 }
@@ -315,9 +334,44 @@ bool VfsEngine::can_write_path(const UserRecord& user, std::string_view vpath, P
     return false;
 }
 
+bool VfsEngine::is_hidden_by_meta(std::string_view global_vpath) {
+    auto clean = clean_vpath(global_vpath);
+    if (!clean || *clean == "/") return false;
+    std::string cur = *clean;
+    while (cur != "/") {
+        auto [parent_dir, basename] = split_vpath(cur);
+        if (!basename.empty()) {
+            // Walk every ancestor meta rule, not only the nearest one. A child
+            // metadata record must not mask a parent's hide rule for this entry.
+            std::string scope = parent_dir;
+            while (true) {
+                auto meta = db_.find_nearest_meta(scope);
+                if (!meta) break;
+                const bool applies = meta->path == parent_dir ||
+                                    (meta->h_sub && is_subpath(meta->path, parent_dir));
+                if (applies && !meta->hide.empty() && matches_any_hide_pattern(meta->hide, basename)) {
+                    return true;
+                }
+                if (meta->path == "/") break;
+                auto [next_scope, _] = split_vpath(meta->path);
+                if (next_scope == scope) break;
+                scope = std::move(next_scope);
+            }
+        }
+        cur = std::move(parent_dir);
+    }
+    return false;
+}
+
 bool VfsEngine::should_sign_path(std::string_view global_vpath) {
+    auto clean = clean_vpath(global_vpath);
+    if (!clean) return false;
+    return should_sign_path_clean(*clean);
+}
+
+bool VfsEngine::should_sign_path_clean(std::string_view clean_global_vpath) {
     if (db_.get_setting_bool("sign_all", false)) return true;
-    if (auto mm = match_mount(global_vpath)) {
+    if (auto mm = match_mount(clean_global_vpath)) {
         return mm->mounted->record.enable_sign;
     }
     return false;
@@ -326,17 +380,18 @@ bool VfsEngine::should_sign_path(std::string_view global_vpath) {
 std::string VfsEngine::sign_vpath(std::string_view global_vpath) {
     auto clean = clean_vpath(global_vpath).value_or("/");
     std::string tok = db_.get_setting("token", cfg_.jwt_secret);
-    int64_t exp_hours = db_.get_setting_int("link_expiration", 0);
+    int64_t exp_hours = std::clamp<int64_t>(db_.get_setting_int("link_expiration", 0), 0, 87600);
     int64_t exp_ts = (exp_hours > 0) ? (unix_now() + exp_hours * 3600) : 0;
     return sign_url_payload(tok, clean, exp_ts);
 }
 
 bool VfsEngine::verify_vpath_signature(std::string_view global_vpath, std::string_view sign_param) {
-    if (!should_sign_path(global_vpath)) return true;
+    auto clean = clean_vpath(global_vpath);
+    if (!clean) return false;
+    if (!should_sign_path_clean(*clean)) return true;
     if (sign_param.empty()) return false;
-    auto clean = clean_vpath(global_vpath).value_or("/");
     std::string tok = db_.get_setting("token", cfg_.jwt_secret);
-    return verify_url_payload(tok, clean, sign_param);
+    return verify_url_payload(tok, *clean, sign_param);
 }
 
 VfsListResult VfsEngine::list_dir(const UserRecord* user, std::string_view global_vpath,
@@ -443,7 +498,7 @@ VfsListResult VfsEngine::list_dir(const UserRecord* user, std::string_view globa
     }
 
     // Apply RBAC child scope visibility + Meta.Hide filtering + URL Signing
-    bool need_sign = should_sign_path(clean);
+    bool need_sign = should_sign_path_clean(clean);
     int32_t perm = user ? effective_permissions(*user, clean) : kAllPermissionsMask;
     bool check_hide = user && !user->is_admin() && !has_perm(perm, PermSeeHides) &&
                       meta.has_value() && !meta->hide.empty() &&
@@ -477,7 +532,7 @@ VfsListResult VfsEngine::list_dir(const UserRecord* user, std::string_view globa
             // A user assigned only to missing/empty roles has no scoped visibility.
             continue;
         }
-        if (!item.is_dir && (need_sign || should_sign_path(child_vpath))) {
+        if (!item.is_dir && (need_sign || should_sign_path_clean(child_vpath))) {
             item.sign = sign_vpath(child_vpath);
         }
         res.entries.push_back(std::move(item));
@@ -536,7 +591,7 @@ VfsGetResult VfsEngine::get_obj(const UserRecord* user, std::string_view global_
         }
         res.entry = *st;
         if (!res.entry.is_dir) {
-            if (should_sign_path(clean)) {
+            if (should_sign_path_clean(clean)) {
                 res.entry.sign = sign_vpath(clean);
             }
             std::string prefix = mm->mounted->record.web_proxy ? "/p" : "/d";

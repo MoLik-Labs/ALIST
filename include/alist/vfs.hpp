@@ -7,6 +7,7 @@
 #include "alist/models.hpp"
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <shared_mutex>
 #include <string>
@@ -57,6 +58,7 @@ public:
     bool is_path_in_role_scope(const UserRecord& user, std::string_view vpath);
     bool can_read_path(const UserRecord& user, std::string_view vpath, std::string_view meta_password, int* status_out = nullptr, std::string* err_out = nullptr);
     bool can_write_path(const UserRecord& user, std::string_view vpath, PermissionBit required_bit, std::string_view meta_password = "");
+    bool is_hidden_by_meta(std::string_view global_vpath);
 
     // Resolve user's BasePath + relative request path -> canonical global VFS path
     std::optional<std::string> resolve_user_path(const UserRecord& user, std::string_view req_path) const;
@@ -103,13 +105,15 @@ private:
         std::string subpath; // Canonical path inside driver
     };
 
-    std::optional<MountMatch> match_mount(std::string_view global_vpath);
+    // Internal callers pass paths already normalized with clean_vpath().
+    std::optional<MountMatch> match_mount(std::string_view clean_global_vpath);
+    bool should_sign_path_clean(std::string_view clean_global_vpath);
     std::vector<std::string> list_virtual_children(std::string_view global_vpath);
 
     Database& db_;
     const AppConfig& cfg_;
 
-    std::map<std::string, std::shared_ptr<MountedStorage>> mounts_; // mount_path -> MountedStorage
+    std::map<std::string, std::shared_ptr<MountedStorage>, std::less<>> mounts_; // mount_path -> MountedStorage
     std::atomic<uint64_t> balance_rr_{0};
 
     // Immutable copy-on-write directory listing cache -> zero reader/writer slice race!
