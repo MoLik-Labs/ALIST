@@ -31,8 +31,8 @@ claiming per-driver parity.
 The native router has dozens of `/api/` routes for authentication, users,
 roles, storage administration, filesystem operations, shares, tasks and public
 settings, plus WebDAV. `web/app.js` calls these routes directly. The experimental
-Worker exposes `/v1/...` endpoints using one shared bearer token; it is not
-compatible with the Kova UI/API and has no multi-user login, sessions or account
+Worker exposes `/v1/...` endpoints using one shared bearer token and disabled-by-default `/v2/...` experiments using preseeded sessions and owner-scoped credentials. It is not
+compatible with the Kova UI/API and has no multi-user login or account
 management. Its Google credential belongs to one Worker configuration; anyone
 with its bearer token can read that account's permitted files. It must not be
 used with sensitive data or as a multi-user security boundary.

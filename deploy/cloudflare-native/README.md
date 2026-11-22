@@ -10,7 +10,7 @@ To experiment, create a separate Worker project and isolated R2 bucket; bind the
 bucket as `R2` and set `KOVA_NATIVE_TOKEN` to a unique random secret of at least
 32 characters through Cloudflare's runtime secret settings. Use HTTPS. Do not
 bind production data. There is deliberately no one-click button: the prototype
-has no user accounts, D1 metadata, large/multipart uploads, deletion, permission scopes, rate
+has no user registration or login, Kova-compatible D1 metadata, large/multipart uploads, deletion, permission scopes, rate
 limiting, session revocation, WebDAV, legacy API compatibility, backup workflow,
 or real-provider/browser testing. Possession of the single token grants read
 access to the **entire bucket**, including create access if writes are enabled. Do not expose this on a public service or use
@@ -109,8 +109,9 @@ boundary until integrated and reviewed end to end.
 `migrations/0002_sessions.sql` and `src/sessions.js` add isolated session
 primitives: 256-bit random tokens, token hashes in D1, fixed expiry (at most
 24 hours), account-disabled checks and revocation. Tests use SQLite and the
-local workerd/D1 emulator; they do not verify production D1. **No HTTP route
-uses them.** `issueSession` must only be called after a trusted authentication
+local workerd/D1 emulator; they do not verify production D1. The opt-in `/v2`
+experiment can validate and revoke sessions but provides no way to issue them
+through HTTP. `issueSession` must only be called after a trusted authentication
 flow verifies identity. There is no password authentication, login UI, reset,
 2FA, CSRF policy, session cookie handling, brute-force protection, multi-user
 provider authorization or operational key recovery. Disabling an account must
@@ -129,7 +130,7 @@ silently reduce password-hash strength or assume a local test proves production
 limits. Choose and test an appropriate authentication design before wiring a
 login flow to session issuance.
 
-## Credential-vault foundation (not integrated)
+## Credential-vault foundation (experimental)
 
 The experimental `0004_connections.sql` and `src/credential-vault.js` store a
 single owner's Google credentials in D1 using AES-256-GCM. Random 96-bit nonces
@@ -139,11 +140,32 @@ actor identity must come from a trusted authentication layer, not client input.
 Tests cover ciphertext tampering, owner changes, disabled users and isolated
 workerd/D1 emulation. They do not constitute a security review or test real D1.
 
-No HTTP route, Google connector or UI uses this vault; the existing prototype
-still uses one account-level bearer secret and must not be treated as multi-user.
+An isolated `/v2/google-drive/` experiment uses this vault and session
+primitives for owner-only listing and downloads; it is disabled unless
+`KOVA_EXPERIMENTAL_V2=enabled`. It has no login or provisioning flow and is not
+integrated into the Kova UI. The older `/v1` prototype still uses one
+account-level bearer secret and must not be treated as multi-user.
 Key provisioning, key versioning/rotation, safe backup/recovery, audit, OAuth
 consent/revocation, deletion semantics at Google and grant-based sharing are not
 implemented. Losing the separate master key makes encrypted credentials
 unrecoverable. A deployment operator able to alter Worker code or access the
 key can access credentials; this is not end-to-end encryption. Do not store
 production secrets until the complete system is reviewed and tested.
+
+
+## Owner-scoped connector experiment
+
+The opt-in `/v2/google-drive/files?connection=...` and
+`/v2/google-drive/file?connection=...&id=...` routes require a session token,
+D1 binding `DB`, and a separate vault key. `/v2/me` and `POST /v2/logout`
+validate or revoke the same bearer session. Only the enabled connection owner is
+allowed; a user ID from the request is never trusted. The route refreshes the
+owner's Google token and uses the same limited read-only connector. It is tested
+with mock Google responses and local workerd/D1 emulation only.
+
+**Do not enable or deploy for users:** there is no trusted login, session
+issuance, OAuth consent, connection provisioning/revocation, D1 migration
+deployment, throttling or UI, and no real provider test. It does not implement
+roles, resource sharing or Kova API compatibility. The test harness seeds users,
+sessions and connections directly and is not part of the Worker. The v1 shared
+bearer routes remain separate and would bypass these owner checks if enabled.
