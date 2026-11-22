@@ -79,8 +79,9 @@ errors. Binary downloads support one validated byte range for resuming; Google
 may ignore the range and respond with the full file. It fixes upstream hosts and
 rejects redirects, strips upstream headers,
 limits JSON responses, and never returns credentials in errors. Downloads have a
-30-second deadline; large files and redirects may fail. **Mocks only:** this has
-not been exercised against a real Google account or deployed Worker. Do not use
+30-second deadline for response headers, not a fixed deadline for the streamed
+body; network failures, platform limits and redirects may still interrupt transfers.
+**Mocks only:** this has not been exercised against a real Google account or deployed Worker. Do not use
 it for production or sensitive data. Revoke credentials after experimentation.
 
 ## Access-control foundation (not integrated)

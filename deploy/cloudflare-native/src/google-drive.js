@@ -94,9 +94,19 @@ export async function googleDriveRequest(url, env, requestHeaders = new Headers(
     }
     const headers = { authorization: `Bearer ${token}` };
     if (range) headers.range = requestHeaders.get('range');
-    const upstream = await fetch(target.toString(), {
-      ...fetchOptions, signal: AbortSignal.timeout(30000), headers,
-    });
+    // A fixed AbortSignal.timeout on a streaming response also aborts its
+    // body, truncating downloads after 30 seconds. Limit time to headers for
+    // downloads instead; retain the full deadline for bounded JSON listings.
+    let upstream;
+    if (download) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30000);
+      try {
+        upstream = await fetch(target.toString(), { ...fetchOptions, signal: controller.signal, headers });
+      } finally { clearTimeout(timer); }
+    } else {
+      upstream = await fetch(target.toString(), { ...fetchOptions, signal: AbortSignal.timeout(30000), headers });
+    }
     if (upstream.status === 404) return error(404, 'Not found');
     if (upstream.status === 429 || upstream.status === 503) return error(503, 'Google Drive temporarily unavailable');
     if (download && range && upstream.status === 416) {

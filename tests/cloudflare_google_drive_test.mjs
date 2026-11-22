@@ -42,7 +42,16 @@ try {
   assert.equal(requests[1].options.headers.authorization, 'Bearer access-secret');
   assert.equal(requests[1].options.redirect, 'manual');
   mode = 'download';
-  response = await handleRequest(makeRequest('/v1/google-drive/file?id=file-1'), env);
+  // The header deadline must be cleared once streaming can begin; otherwise
+  // an otherwise healthy download is aborted after 30 seconds.
+  const realSetTimeout = globalThis.setTimeout, realClearTimeout = globalThis.clearTimeout;
+  let pendingTimer, cleared = false;
+  globalThis.setTimeout = (fn, delay) => { assert.equal(delay, 30000); pendingTimer = { fn }; return pendingTimer; };
+  globalThis.clearTimeout = timer => { assert.equal(timer, pendingTimer); cleared = true; };
+  try { response = await handleRequest(makeRequest('/v1/google-drive/file?id=file-1'), env); }
+  finally { globalThis.setTimeout = realSetTimeout; globalThis.clearTimeout = realClearTimeout; }
+  assert.ok(cleared, 'download header deadline must be cleared');
+  assert.equal(requests.at(-1).options.signal.aborted, false);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('content-type'), 'application/octet-stream');
   assert.equal(response.headers.get('set-cookie'), null);
