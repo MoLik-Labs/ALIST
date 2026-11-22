@@ -127,7 +127,13 @@ An additional, separately disabled owner-scoped experiment requires both
 `KOVA_EXPERIMENTAL_V2=enabled` and `KOVA_EXPERIMENTAL_DROPBOX_V2=enabled`,
 D1 migrations through `0007_dropbox_connections.sql`, a valid vault key, and a
 pre-established session. `POST /v2/dropbox/connections` accepts a JSON object
-with only `accessToken`; `GET` lists the authenticated owner's connections;
+with only `accessToken`, or the C++ driver's equivalent credential fields
+`appKey`, `appSecret` and `refreshToken` (all three required, no other fields).
+Existing access-token records remain compatible. Refresh credentials are sealed
+in D1 and exchanged at Dropbox's fixed OAuth endpoint when needed. This does not
+implement the OAuth consent flow: obtaining these credentials remains a manual
+test step. There is no access-token cache, so each operation incurs a refresh
+request and Dropbox's associated latency/quota. `GET` lists the authenticated owner's connections;
 `DELETE /v2/dropbox/connections?id=...` deletes the local record. The bearer
 session is required for each request. `GET /v2/dropbox/files?connection=...`
 and `GET /v2/dropbox/file?connection=...&path=...` use that owner's encrypted
@@ -150,7 +156,7 @@ The write uses a shared folder's existing Dropbox permissions and does not
 implement Kova public/private sharing.
 
 These endpoints use fixed Dropbox API hosts and never follow redirects. Dropbox
-access tokens expire; OAuth/refresh, larger uploads, shares, rate limiting,
+access tokens expire; interactive OAuth, larger uploads, shares, rate limiting,
 UI upload and real-provider testing remain unimplemented. v1 is still a shared-token endpoint
 if separately enabled; v2 does not change its security model. Local tests use
 mock responses, not Dropbox. Revoke test credentials after use. Dropbox quotas

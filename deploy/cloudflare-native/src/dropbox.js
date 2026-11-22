@@ -37,13 +37,15 @@ export async function dropboxRequest(url, env) {
   if (env?.KOVA_EXPERIMENTAL_DROPBOX !== 'enabled') return fail(404,'Not found');
   const list = url.pathname === '/v1/dropbox/files', download = url.pathname === '/v1/dropbox/file';
   if (!list && !download) return fail(404,'Not found');
-  const token = env.DROPBOX_ACCESS_TOKEN;
-  if (typeof token !== 'string' || token.length < 1 || token.length > 4096 || /[^\x21-\x7e]/.test(token)) return fail(503,'Dropbox is not configured');
+  const tokenSource = env.DROPBOX_ACCESS_TOKEN;
+  if (typeof tokenSource !== 'function' && (typeof tokenSource !== 'string' || tokenSource.length < 1 || tokenSource.length > 4096 || /[^\x21-\x7e]/.test(tokenSource))) return fail(503,'Dropbox is not configured');
   const paths = url.searchParams.getAll('path'), cursors = url.searchParams.getAll('cursor');
   if (paths.length > 1 || cursors.length > 1 || (download && (paths.length !== 1 || cursors.length)) ||
       (list && cursors.length && paths.length) || (cursors.length && (!cursors[0] || !clean(cursors[0],4096))) ||
       (paths.length && !pathOK(paths[0])) || (download && !paths[0])) return fail(400,'Invalid request');
   try {
+    const token = typeof tokenSource === 'function' ? await tokenSource() : tokenSource;
+    if (typeof token !== 'string' || token.length < 1 || token.length > 4096 || /[^\x21-\x7e]/.test(token)) throw Error('Invalid token');
     const headers = {authorization:`Bearer ${token}`};
     let response;
     if (list) {
@@ -108,11 +110,15 @@ export async function uploadDropbox(request, url, token, authorize) {
     }
     if(total!==length)return fail(400,'Invalid body length');
     if(!await authorize())return fail(401,'Unauthorized');
+    const accessToken=typeof token==='function' ? await token() : token;
+    if(typeof accessToken!=='string' || accessToken.length<1 || accessToken.length>4096 || /[^\x21-\x7e]/.test(accessToken))throw Error('Invalid token');
+    // Refresh may be slow; recheck once more before the provider write.
+    if(!await authorize())return fail(401,'Unauthorized');
     const bytes=new Uint8Array(total);let offset=0;
     for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}
     const response=await fetch('https://content.dropboxapi.com/2/files/upload',{
       method:'POST',redirect:'manual',signal:AbortSignal.timeout(30000),
-      headers:{authorization:`Bearer ${token}`,'content-type':'application/octet-stream','dropbox-api-arg':asciiJson({path:paths[0],mode:'add',autorename:false,mute:false,strict_conflict:true})},body:bytes,
+      headers:{authorization:`Bearer ${accessToken}`,'content-type':'application/octet-stream','dropbox-api-arg':asciiJson({path:paths[0],mode:'add',autorename:false,mute:false,strict_conflict:true})},body:bytes,
     });
     if(response.status===409)return fail(409,'Dropbox could not create the file');
     if(response.status===429 || response.status===503)return fail(503,'Dropbox temporarily unavailable');

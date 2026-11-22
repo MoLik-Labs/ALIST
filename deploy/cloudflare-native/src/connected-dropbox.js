@@ -1,5 +1,5 @@
-// Isolated, opt-in Dropbox access-token connections. Not production-ready:
-// no OAuth refresh, rate limiting, provider revocation or frontend integration.
+// Isolated, opt-in Dropbox credential connections. Not production-ready:
+// no interactive Dropbox OAuth, rate limiting or provider revocation.
 import {authenticateSession, hashSessionToken, sessionFromRequest} from './sessions.js';
 import {vaultKey, decode, readSmallJson} from './google-oauth.js';
 import {dropboxRequest, uploadDropbox} from './dropbox.js';
@@ -7,6 +7,35 @@ const enc = new TextEncoder();
 const b64 = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 const idPattern = /^[A-Za-z0-9_-]{22}$/;
 const validToken = v => typeof v === 'string' && v.length > 0 && v.length <= 4096 && /^[\x21-\x7e]+$/.test(v);
+function encodeCredentials(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const keys = Object.keys(body).sort().join(',');
+  if (keys === 'accessToken' && validToken(body.accessToken)) return body.accessToken; // legacy encoding
+  if (keys === 'appKey,appSecret,refreshToken' && [body.appKey,body.appSecret,body.refreshToken].every(validToken)) {
+    const payload = '\u0001' + JSON.stringify({appKey:body.appKey,appSecret:body.appSecret,refreshToken:body.refreshToken});
+    return enc.encode(payload).byteLength <= 12000 ? payload : null;
+  }
+  return null;
+}
+async function accessTokenFor(plaintext) {
+  if (!plaintext.startsWith('\u0001')) {
+    if (!validToken(plaintext)) throw Error('Invalid token');
+    return plaintext;
+  }
+  const credentials = JSON.parse(plaintext.slice(1));
+  if (encodeCredentials(credentials) !== plaintext) throw Error('Invalid credentials');
+  // As in the native C++ Dropbox driver, refresh at Dropbox's fixed OAuth host.
+  // No cross-user token cache: never trade owner isolation for speed.
+  const response = await fetch('https://api.dropboxapi.com/oauth2/token',{
+    method:'POST',redirect:'manual',signal:AbortSignal.timeout(15000),
+    headers:{'content-type':'application/x-www-form-urlencoded'},
+    body:new URLSearchParams({grant_type:'refresh_token',client_id:credentials.appKey,client_secret:credentials.appSecret,refresh_token:credentials.refreshToken}),
+  });
+  if (response.status !== 200) throw Error('Dropbox authorization failed');
+  const accessToken = (await readSmallJson(response)).access_token;
+  if (!validToken(accessToken)) throw Error('Invalid access token');
+  return accessToken;
+}
 const aad = (id, user) => enc.encode(JSON.stringify([1,'dropbox',id,user]));
 const now = () => Math.floor(Date.now()/1000);
 const json = (status, value) => new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'no-referrer'}});
@@ -30,10 +59,11 @@ export async function connectedDropboxRequest(request, env) {
       if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get('content-type') || '')) return fail(415,'Expected JSON');
       let body;
       try { body = await readSmallJson(request); } catch { return fail(400,'Invalid request'); }
-      if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1 || !validToken(body.accessToken)) return fail(400,'Invalid request');
+      const credentialText=encodeCredentials(body);
+      if (credentialText === null) return fail(400,'Invalid request');
       const key = await vaultKey(env.KOVA_CREDENTIAL_KEY), id = b64(crypto.getRandomValues(new Uint8Array(16)));
       const nonce = crypto.getRandomValues(new Uint8Array(12));
-      const cipher = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv:nonce,additionalData:aad(id,user)},key,enc.encode(body.accessToken)));
+      const cipher = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv:nonce,additionalData:aad(id,user)},key,enc.encode(credentialText)));
       const timestamp = now(), sessionHash = await hashSessionToken(session);
       const result = await env.DB.prepare(`INSERT INTO dropbox_connections (id,owner_id,nonce,ciphertext,created_at)
         SELECT ?,u.id,?,?,? FROM users AS u WHERE u.id=? AND u.disabled=0
@@ -62,9 +92,11 @@ export async function connectedDropboxRequest(request, env) {
     if (!row) return fail(404,'Not found');
     const key=await vaultKey(env.KOVA_CREDENTIAL_KEY), nonce=decode(row.nonce,16);
     if (nonce.length !== 12) throw Error('Invalid nonce');
-    const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:nonce,additionalData:aad(row.id,row.owner_id)},key,decode(row.ciphertext,6000));
-    const accessToken=new TextDecoder('utf-8',{fatal:true}).decode(plain);
-    if (!validToken(accessToken)) throw Error('Invalid token');
+    const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:nonce,additionalData:aad(row.id,row.owner_id)},key,decode(row.ciphertext,20000));
+    const credentialText=new TextDecoder('utf-8',{fatal:true}).decode(plain);
+    // Resolve lazily after request validation (and, for uploads, after the
+    // live-session recheck), avoiding token refresh for invalid requests.
+    const accessToken=()=>accessTokenFor(credentialText);
     if (upload) {
       // Recheck the session, account and unchanged encrypted connection after
       // the request body has been read and just before the provider write.
