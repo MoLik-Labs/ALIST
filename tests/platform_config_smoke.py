@@ -24,5 +24,6 @@ assert 'deploy.workers.cloudflare.com/?url=' in readme
 assert 'public repository' in readme and 'edge proxy' in readme
 render = (root / 'render.yaml').read_text()
 assert 'mountPath: /opt/alist/data' in render and 'healthCheckPath: /ping' in render
-assert 'autoDeployTrigger: off' in render
+assert "autoDeployTrigger: 'off'" in render
+assert 'key: ALIST_ADMIN_PASSWORD\n        generateValue: true' in render
 print('Platform configuration invariants passed (no cloud deployment performed)')

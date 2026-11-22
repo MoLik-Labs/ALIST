@@ -494,11 +494,12 @@ void Database::seed_defaults(std::string* initial_admin_pwd_out) {
 
         Stmt uc(db_, "SELECT COUNT(*) FROM x_users WHERE username = 'admin';");
         if (uc.step() == SQLITE_ROW && uc.col_i64(0) == 0) {
-            std::string init_pwd = random_base64url(12);
-            if (const char* env_pw = std::getenv("ALIST_ADMIN_PASSWORD"); env_pw && *env_pw) {
-                init_pwd = env_pw;
-            }
-            if (initial_admin_pwd_out) *initial_admin_pwd_out = init_pwd;
+            const char* env_pw = std::getenv("ALIST_ADMIN_PASSWORD");
+            const bool supplied_password = env_pw && *env_pw;
+            std::string init_pwd = supplied_password ? std::string(env_pw) : random_base64url(12);
+            // Only return generated credentials for the bootstrap log. A password
+            // supplied via a secret manager must never be copied into logs.
+            if (initial_admin_pwd_out && !supplied_password) *initial_admin_pwd_out = init_pwd;
 
             UserRecord admin_u;
             admin_u.username = "admin";

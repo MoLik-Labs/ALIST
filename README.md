@@ -29,7 +29,10 @@ Cloudflare's button requires a public repository, and Render users need access
 to the repository. Buttons use `BETA`,
 so changes in an unmerged branch are not included. Cloudflare deploys only the
 edge proxy; it needs a separate HTTPS origin and `KOVA_ORIGIN` secret. Render
-creates a paid persistent disk; review the plan and costs before confirming.
+creates a paid persistent disk and generates an initial admin password; review
+the plan and costs before confirming and retrieve the password from Render
+service environment settings. These links target the upstream repository, not
+your fork; for a fork select your repository in the provider dashboard.
 See the [platform deployment guide](docs/platform-deployment.md) for Railway,
 Fly.io, Heroku, persistence, backup, scaling and first-start instructions.
 

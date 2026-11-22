@@ -2,7 +2,7 @@ package s3store
 
 import (
 	"context"
-	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,13 +18,13 @@ func TestListPagePagination(t *testing.T) {
 			return
 		}
 		if q.Get("continuation-token") == "" {
-			fmt.Fprint(w, `<ListBucketResult><EncodingType>url</EncodingType><IsTruncated>true</IsTruncated><NextContinuationToken>a+/=</NextContinuationToken><CommonPrefixes><Prefix>docs%2Fsub%2F</Prefix></CommonPrefixes><Contents><Key>docs%2Fa%20b.txt</Key><Size>5</Size><ETag>etag</ETag></Contents></ListBucketResult>`)
+			io.WriteString(w, `<ListBucketResult><EncodingType>url</EncodingType><IsTruncated>true</IsTruncated><NextContinuationToken>a+/=</NextContinuationToken><CommonPrefixes><Prefix>docs%2Fsub%2F</Prefix></CommonPrefixes><Contents><Key>docs%2Fa%20b.txt</Key><Size>5</Size><ETag>etag</ETag></Contents></ListBucketResult>`)
 			return
 		}
 		if q.Get("continuation-token") != "a+/=" {
 			t.Error("bad token")
 		}
-		fmt.Fprint(w, `<ListBucketResult><EncodingType>url</EncodingType><IsTruncated>false</IsTruncated><Contents><Key>docs%2F</Key><Size>0</Size></Contents></ListBucketResult>`)
+		io.WriteString(w, `<ListBucketResult><EncodingType>url</EncodingType><IsTruncated>false</IsTruncated><Contents><Key>docs%2F</Key><Size>0</Size></Contents></ListBucketResult>`)
 	}))
 	defer server.Close()
 	c, err := New(Config{BucketURL: server.URL + "/bucket", Region: "auto", AccessKey: "key", SecretKey: "secret", AllowPrivate: true, AllowInsecureHTTP: true})
@@ -44,7 +44,7 @@ func TestListPagePagination(t *testing.T) {
 
 func TestListPageRejectsInvalidResponses(t *testing.T) {
 	for _, body := range []string{`<wrong/>`, `<ListBucketResult><EncodingType>url</EncodingType><IsTruncated>true</IsTruncated></ListBucketResult>`, `<ListBucketResult><EncodingType>url</EncodingType><Contents><Key>other%2Fsecret</Key><Size>1</Size></Contents></ListBucketResult>`, strings.Repeat("x", (4<<20)+1)} {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, body) }))
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, body) }))
 		c, err := New(Config{BucketURL: server.URL, Region: "auto", AccessKey: "key", SecretKey: "secret", AllowPrivate: true, AllowInsecureHTTP: true})
 		if err != nil {
 			t.Fatal(err)

@@ -10,7 +10,8 @@ test restoration. A volume is not a backup or high availability. Platform plans,
 volumes, network traffic and builds may incur charges.
 
 Set a strong `ALIST_ADMIN_PASSWORD` as a platform secret **before first boot**,
-or find the generated initial password in protected service logs. The variable
+or find the generated initial password in protected service logs. A supplied
+password is not logged; protect any bootstrap logs containing generated passwords. The variable
 only initializes a new database; changing it later does not reset the account.
 Protect logs and secrets. Keep `/opt/alist/data` private and writable by the
 container's configured PUID/PGID. `/ping` checks process liveness, not storage
@@ -23,11 +24,14 @@ Use the Deploy to Render button in the root README or create a Blueprint from
 your accessible fork. The root `render.yaml` builds the native Dockerfile,
 sets a `/ping` health check and mounts a 1 GB disk at `/opt/alist/data`. It uses
 a paid `starter` plan in Singapore; review pricing and region. Set the initial
-administrator password securely before first start where the dashboard permits,
-otherwise retrieve the generated password from protected logs. The button uses
+administrator password is generated automatically by Render; retrieve it from
+the service environment in the Render dashboard and keep it private. The initial
+password is not written to application logs. The button uses
 the repository's default branch and auto-deploy is off; update deliberately
 from your own fork after reviewing changes. Confirm the disk is mounted and
-data survives a restart. Render disk services have platform-specific scaling and
+data survives a restart. To deploy your fork rather than the original, create a
+Blueprint in the Render dashboard and select your fork and branch: the README
+button explicitly targets the upstream repository. Render disk services have platform-specific scaling and
 deployment limitations.
 
 ## Railway
@@ -79,7 +83,11 @@ until a durable external metadata database is implemented and tested.
 The Cloudflare button deploys the Worker in `deploy/cloudflare-worker`, not the
 native server or database. First deploy an origin with persistent storage, then
 supply the HTTPS `KOVA_ORIGIN` secret. See the [Worker guide](../deploy/cloudflare-worker/README.md)
-for routing and origin security. Cloudflare's deploy button supports Workers,
+for routing and origin security. For a fork, connect your repository in Workers
+Builds, select its deployment branch, and set root directory to
+`deploy/cloudflare-worker`; configure `KOVA_ORIGIN` as a runtime secret (build
+secrets are not runtime bindings). The README button targets the upstream repo,
+not the fork. Cloudflare's deploy button supports Workers,
 not Pages. There is no standalone Kova Pages deployment: the UI is embedded in
 the native server and the APIs and data need a separate origin. The proxy does
 not cache private workspace responses, and Cloudflare upload limits and origin
