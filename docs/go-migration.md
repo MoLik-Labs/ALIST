@@ -128,6 +128,16 @@ been built with Docker or deployed to Render in this environment.
   round-robin using atomically replaced immutable snapshots. It is only the
   routing table: authorization, storage drivers and resource lifetime management
   are not implemented here. Mounted values must remain valid for in-flight work.
+- `internal/s3store`: an experimental S3-compatible single-object streaming GET
+  client using SigV4 query authentication. It supports session credentials,
+  HTTPS by default, and guarded outbound connections without redirects; LAN and
+  plain HTTP require separate opt-ins. Its signing matches the published AWS
+  example, and private-address rejection and streaming are tested locally. It
+  is **not yet connected** to the server, does not list, write, delete, or handle
+  multipart uploads, and has not been tested against real S3, R2, or MinIO.
+  Presigned URLs are credentials and are not exposed by the public API; callers
+  must close streams and bound their reads. The client rejects some valid S3 keys
+  (including dot segments and repeated slashes) rather than normalizing them.
 - `internal/outbound`: an experimental HTTP(S) client that checks every DNS
   answer, dials a checked IP, verifies TLS against the URL hostname, rechecks
   redirects and strips cross-origin headers. It rejects private and reserved
