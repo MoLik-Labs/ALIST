@@ -71,10 +71,16 @@ export async function readGoogleConnection(db, secret, actorId, id) {
   }
 }
 
-export async function deleteGoogleConnection(db, actorId, id) {
-  if (!validId(actorId) || !validId(id)) return false;
+export async function deleteGoogleConnection(db, actorId, id, requiredSessionHash = null, now = nowSeconds()) {
+  if (!validId(actorId) || !validId(id) || !validTime(now) || (requiredSessionHash !== null && (typeof requiredSessionHash !== 'string' || !/^[a-f0-9]{64}$/.test(requiredSessionHash)))) return false;
+  // The session predicate and deletion run as one statement to prevent a
+  // session-revocation race between authorization and the destructive write.
+  const guard = requiredSessionHash === null ? '' : ` AND EXISTS (
+    SELECT 1 FROM sessions AS s WHERE s.token_hash = ? AND s.user_id = provider_connections.owner_id
+      AND s.revoked_at IS NULL AND s.expires_at > ?)`;
+  const values = [id, actorId, PROVIDER, actorId];
+  if (requiredSessionHash !== null) values.push(requiredSessionHash, now);
   const result = await db.prepare(`DELETE FROM provider_connections WHERE id = ? AND owner_id = ? AND provider = ?
-    AND EXISTS (SELECT 1 FROM users WHERE id = ? AND disabled = 0)`)
-    .bind(id, actorId, PROVIDER, actorId).run();
+    AND EXISTS (SELECT 1 FROM users WHERE id = ? AND disabled = 0)${guard}`).bind(...values).run();
   return result.meta?.changes === 1;
 }

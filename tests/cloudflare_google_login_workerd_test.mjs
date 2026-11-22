@@ -16,6 +16,10 @@ const encode = x => btoa(JSON.stringify(x)).replace(/\\+/g,'-').replace(/\\//g,'
 globalThis.fetch = async (url, options) => {
  if (String(url)==='https://www.googleapis.com/oauth2/v3/certs') return Response.json({keys:[${JSON.stringify(publicKey)}]});
  if (String(url).startsWith('https://www.googleapis.com/drive/v3/files?')) return Response.json({files:[{id:'f',name:'My file',mimeType:'text/plain'}]});
+ if (String(url).startsWith('https://www.googleapis.com/drive/v3/files/f?')) {
+  if (options.headers.range !== 'bytes=2-4') throw Error('missing range');
+  return new Response('cde',{status:206,headers:{'content-range':'bytes 2-4/6','content-length':'3'}});
+ }
  if (String(url)!=='https://oauth2.googleapis.com/token') throw Error('unexpected host');
  if (options.body.get('grant_type')==='refresh_token') return Response.json({access_token:'synthetic-access'});
  const now=Math.floor(Date.now()/1000), h=encode({alg:'RS256',kid:'key'}), p=encode({iss:'https://accounts.google.com',aud:'client',sub:'google-subject',nonce,iat:now,exp:now+300});
@@ -36,9 +40,14 @@ export default {async fetch(req,env){
  const listData=await connections.json();
  const drive=await handleRequest(new Request('https://worker.test/v2/google-drive/files?connection='+connection,{headers:{authorization:'Bearer '+data.token}}),config);
  const listing=await drive.json();
+ const part=await handleRequest(new Request('https://worker.test/v2/google-drive/file?connection='+connection+'&id=f',{headers:{authorization:'Bearer '+data.token,range:'bytes=2-4'}}),config);
+ const rangeResult={status:part.status,range:part.headers.get('content-range'),body:await part.text()};
+ const disconnect=await handleRequest(new Request('https://worker.test/v2/connections?id='+connection,{method:'DELETE',headers:{authorization:'Bearer '+data.token}}),config);
+ const disconnected=await disconnect.json();
+ const driveAfter=await handleRequest(new Request('https://worker.test/v2/google-drive/files?connection='+connection,{headers:{authorization:'Bearer '+data.token}}),config);
  const logout=await handleRequest(new Request('https://worker.test/v2/logout',{method:'POST',headers:{authorization:'Bearer '+data.token}}),config);
  const after=await handleRequest(new Request('https://worker.test/v2/me',{headers:{authorization:'Bearer '+data.token}}),config);
- return Response.json({start:start.status,finish:finish.status,me:await me.json(),connections:connections.status,connectionListed:listData.connections.length === 1 && listData.connections[0].id === connection && listData.connections[0].provider === 'google_drive',drive:drive.status,listing,logout:logout.status,after:after.status,replay:(await handleRequest(callback(),config)).status});
+ return Response.json({start:start.status,finish:finish.status,me:await me.json(),connections:connections.status,connectionListed:listData.connections.length === 1 && listData.connections[0].id === connection && listData.connections[0].provider === 'google_drive',drive:drive.status,listing,rangeResult,disconnect:disconnect.status,disconnected,driveAfter:driveAfter.status,logout:logout.status,after:after.status,replay:(await handleRequest(callback(),config)).status});
 }};`;
 modules.unshift({type:'ESModule',path:`${process.cwd()}/entry.js`,contents:harness});
 const mf=new Miniflare(convertV4MiniflareOptions({modules,compatibilityDate:'2026-11-16',d1Databases:['DB']}));
@@ -50,6 +59,6 @@ try {
  }
  await db.batch([db.prepare("INSERT INTO users(id,username) VALUES('alice','alice')"),db.prepare("INSERT INTO external_identities VALUES('google','google-subject','alice')")]);
  const response=await mf.dispatchFetch('http://localhost/test'); assert.equal(response.status,200);
- assert.deepEqual(await response.json(),{start:200,finish:200,me:{id:'alice'},connections:200,connectionListed:true,drive:200,listing:{files:[{id:'f',name:'My file',mimeType:'text/plain'}],nextPageToken:null},logout:200,after:401,replay:400});
+ assert.deepEqual(await response.json(),{start:200,finish:200,me:{id:'alice'},connections:200,connectionListed:true,drive:200,listing:{files:[{id:'f',name:'My file',mimeType:'text/plain'}],nextPageToken:null},rangeResult:{status:206,range:'bytes 2-4/6',body:'cde'},disconnect:200,disconnected:{ok:true,providerRevoked:false},driveAfter:404,logout:200,after:401,replay:400});
  console.log('Experimental Google login workerd and D1 emulator tests passed');
 } finally {await mf.dispose();}

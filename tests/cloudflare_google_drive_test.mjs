@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { handleRequest } from '../deploy/cloudflare-native/src/index.js';
 
 const env = { KOVA_NATIVE_TOKEN: 'test-only-secret-at-least-32-characters', GOOGLE_CLIENT_ID: 'client-id', GOOGLE_CLIENT_SECRET: 'client-secret', GOOGLE_REFRESH_TOKEN: 'refresh-secret' };
-const makeRequest = (path, token = env.KOVA_NATIVE_TOKEN, method = 'GET') => new Request(`https://worker.test${path}`, { method, headers: { Authorization: `Bearer ${token}` } });
+const makeRequest = (path, token = env.KOVA_NATIVE_TOKEN, method = 'GET', extraHeaders = {}) => new Request(`https://worker.test${path}`, { method, headers: { Authorization: `Bearer ${token}`, ...extraHeaders } });
 const originalFetch = globalThis.fetch;
 const requests = [];
 let mode = 'list';
@@ -15,6 +15,11 @@ globalThis.fetch = async (url, options) => {
   if (mode === 'redirect') return new Response(null, { status: 302, headers: { location: 'https://evil.test/steal' } });
   if (mode === 'download') return new Response('hello', { headers: { 'content-type': 'text/html', 'set-cookie': 'bad=1' } });
   if (mode === 'partial') return new Response('part', { status: 206 });
+  if (mode === 'range') return new Response('llo', { status: 206, headers: { 'content-range': 'bytes 2-4/5', 'content-length': '3', 'set-cookie': 'bad=1' } });
+  if (mode === 'suffix') return new Response('lo', { status: 206, headers: { 'content-range': 'bytes 3-4/5', 'content-length': '2' } });
+  if (mode === 'range-invalid') return new Response('llo', { status: 206, headers: { 'content-range': 'bytes 1-3/5', 'content-length': '3' } });
+  if (mode === 'range-length-mismatch') return new Response('llo', { status: 206, headers: { 'content-range': 'bytes 2-4/5', 'content-length': '4' } });
+  if (mode === 'range-unsatisfiable') return new Response(null, { status: 416, headers: { 'content-range': 'bytes */5' } });
   if (mode === 'oversize') return new Response('a'.repeat(1024 * 1024 + 1));
   return Response.json({ nextPageToken: 'next', files: [{ id: 'file-1', name: 'File', mimeType: 'text/plain', extra: 'omit' }], secret: 'omit' });
 };
@@ -41,6 +46,35 @@ try {
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('content-type'), 'application/octet-stream');
   assert.equal(response.headers.get('set-cookie'), null);
+  assert.equal(await response.text(), 'hello');
+  const downloadWithRange = range => makeRequest('/v1/google-drive/file?id=file-1', env.KOVA_NATIVE_TOKEN, 'GET', { Range: range });
+  const beforeInvalidRanges = requests.length;
+  for (const invalid of ['bytes=2-1', 'bytes=-0', 'bytes=0-1,3-4', 'bytes=9223372036854775808-', 'items=1-2', 'bytes=-']) {
+    assert.equal((await handleRequest(downloadWithRange(invalid), env)).status, 400, invalid);
+  }
+  assert.equal(requests.length, beforeInvalidRanges, 'invalid ranges must not contact Google');
+  mode = 'range';
+  response = await handleRequest(downloadWithRange('bytes=2-4'), env);
+  assert.equal(response.status, 206);
+  assert.equal(response.headers.get('content-range'), 'bytes 2-4/5');
+  assert.equal(response.headers.get('content-length'), '3');
+  assert.equal(response.headers.get('set-cookie'), null);
+  assert.equal(await response.text(), 'llo');
+  assert.equal(requests.at(-1).options.headers.range, 'bytes=2-4');
+  assert.equal((await handleRequest(downloadWithRange('bytes=2-'), env)).status, 206);
+  mode = 'suffix';
+  assert.equal((await handleRequest(downloadWithRange('bytes=-2'), env)).status, 206);
+  mode = 'range-invalid';
+  assert.equal((await handleRequest(downloadWithRange('bytes=2-4'), env)).status, 502);
+  mode = 'range-length-mismatch';
+  assert.equal((await handleRequest(downloadWithRange('bytes=2-4'), env)).status, 502);
+  mode = 'range-unsatisfiable';
+  response = await handleRequest(downloadWithRange('bytes=9-'), env);
+  assert.equal(response.status, 416);
+  assert.equal(response.headers.get('content-range'), 'bytes */5');
+  mode = 'download';
+  response = await handleRequest(downloadWithRange('bytes=2-4'), env);
+  assert.equal(response.status, 200, 'upstream may legitimately ignore a range');
   assert.equal(await response.text(), 'hello');
   mode = 'partial';
   assert.equal((await handleRequest(makeRequest('/v1/google-drive/file?id=file-1'), env)).status, 502);

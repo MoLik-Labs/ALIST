@@ -9,6 +9,11 @@ const validId = id => typeof id === 'string' && ID.test(id);
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 const hex = bytes => [...new Uint8Array(bytes)].map(b => b.toString(16).padStart(2, '0')).join('');
 const hashToken = async token => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)));
+// For guarded D1 mutations after session authentication. Never expose hashes.
+export async function hashSessionToken(token) {
+  if (typeof token !== 'string' || !TOKEN.test(token)) return null;
+  return hashToken(token);
+}
 function makeToken() {
   return btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');

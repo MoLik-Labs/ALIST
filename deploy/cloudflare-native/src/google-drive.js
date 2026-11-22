@@ -35,12 +35,38 @@ const validSecret = value => typeof value === 'string' && value.length > 0 && va
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(value);
 const fetchOptions = { redirect: 'manual' };
 
-export async function googleDriveRequest(url, env) {
+// Single HTTP byte range only. Reject malformed/multipart values before making
+// upstream calls. Integer strings are bounded before conversion to BigInt.
+function parseRange(value) {
+  if (value === null) return null;
+  const m = /^bytes=(\d{1,19})?-(\d{1,19})?$/.exec(value);
+  if (!m || (!m[1] && !m[2])) return false;
+  const max = 9223372036854775807n;
+  const start = m[1] === undefined ? null : BigInt(m[1]);
+  const end = m[2] === undefined ? null : BigInt(m[2]);
+  if ((start !== null && start > max) || (end !== null && end > max) || (start === null && end === 0n) || (start !== null && end !== null && end < start)) return false;
+  return { start, end };
+}
+function validPartial(range, value, length) {
+  const match = /^bytes (\d{1,19})-(\d{1,19})\/(\d{1,19})$/.exec(value || '');
+  if (!match) return false;
+  const start = BigInt(match[1]), end = BigInt(match[2]), total = BigInt(match[3]);
+  if (total === 0n || start > end || end >= total) return false;
+  const expectedStart = range.start === null ? (range.end >= total ? 0n : total - range.end) : range.start;
+  const expectedEnd = range.start === null || range.end === null || range.end >= total ? total - 1n : range.end;
+  if (start !== expectedStart || end !== expectedEnd) return false;
+  if (length !== null && (!/^\d{1,19}$/.test(length) || BigInt(length) !== end - start + 1n)) return false;
+  return true;
+}
+
+export async function googleDriveRequest(url, env, requestHeaders = new Headers()) {
   const list = url.pathname === '/v1/google-drive/files';
   const download = url.pathname === '/v1/google-drive/file';
   if (!list && !download) return error(404, 'Not found');
   const id = url.searchParams.get(list ? 'parent' : 'id') || (list ? 'root' : '');
   const cursor = url.searchParams.get('cursor') || '';
+  const range = download ? parseRange(requestHeaders.get('range')) : null;
+  if (range === false) return error(400, 'Invalid Range header');
   // Restrict IDs before interpolating the Drive query and encoding path segments.
   if (!validId(id) || cursor.length > 2048 || /[\x00-\x1f\x7f]/.test(cursor)) return error(400, 'Invalid request');
   const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN } = env;
@@ -66,14 +92,22 @@ export async function googleDriveRequest(url, env) {
       target.searchParams.set('alt', 'media');
       target.searchParams.set('supportsAllDrives', 'true');
     }
+    const headers = { authorization: `Bearer ${token}` };
+    if (range) headers.range = requestHeaders.get('range');
     const upstream = await fetch(target.toString(), {
-      ...fetchOptions, signal: AbortSignal.timeout(30000), headers: { authorization: `Bearer ${token}` },
+      ...fetchOptions, signal: AbortSignal.timeout(30000), headers,
     });
     if (upstream.status === 404) return error(404, 'Not found');
     if (upstream.status === 429 || upstream.status === 503) return error(503, 'Google Drive temporarily unavailable');
-    // No range request was sent; an unexpected partial or empty success must
-    // not be presented to the client as a complete 200 download/listing.
-    if (upstream.status !== 200) return error(502, 'Google Drive request failed');
+    if (download && range && upstream.status === 416) {
+      const value = upstream.headers.get('content-range');
+      if (!/^bytes \*\/\d{1,19}$/.test(value || '')) return error(502, 'Google Drive request failed');
+      return new Response(null, { status: 416, headers: { 'content-range': value, 'accept-ranges': 'bytes', 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' } });
+    }
+    // A 206 response is valid only for a requested range, with consistent headers.
+    const partial = download && !!range && upstream.status === 206;
+    if (partial && !validPartial(range, upstream.headers.get('content-range'), upstream.headers.get('content-length'))) return error(502, 'Google Drive request failed');
+    if (upstream.status !== 200 && !partial) return error(502, 'Google Drive request failed');
     if (list) {
       const data = await readJson(upstream);
       if (!Array.isArray(data.files)) throw new Error('Invalid response');
@@ -82,10 +116,12 @@ export async function googleDriveRequest(url, env) {
       return json(200, { files, nextPageToken: typeof data.nextPageToken === 'string' ? data.nextPageToken : null });
     }
     // Do not forward arbitrary upstream headers or redirect locations.
-    return new Response(upstream.body, { status: 200, headers: {
-      'content-type': 'application/octet-stream', 'content-disposition': 'attachment',
-      'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff',
-    } });
+    const safeHeaders = { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment',
+      'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff', 'accept-ranges': 'bytes' };
+    const contentLength = upstream.headers.get('content-length');
+    if (contentLength && /^\d{1,19}$/.test(contentLength)) safeHeaders['content-length'] = contentLength;
+    if (partial) safeHeaders['content-range'] = upstream.headers.get('content-range');
+    return new Response(upstream.body, { status: partial ? 206 : 200, headers: safeHeaders });
   } catch {
     return error(502, 'Google Drive request failed');
   }

@@ -3,15 +3,16 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFile } from 'node:fs/promises';
 import { handleRequest } from '../deploy/cloudflare-native/src/index.js';
 import { createGoogleConnection } from '../deploy/cloudflare-native/src/credential-vault.js';
-import { issueSession, revokeSession } from '../deploy/cloudflare-native/src/sessions.js';
+import { issueSession, revokeSession, hashSessionToken } from '../deploy/cloudflare-native/src/sessions.js';
 
 const sqlite = new DatabaseSync(':memory:');
 for (const migration of ['0001_access_foundation.sql', '0002_sessions.sql', '0004_connections.sql'])
   sqlite.exec(await readFile(new URL(`../deploy/cloudflare-native/migrations/${migration}`, import.meta.url), 'utf8'));
+let beforeDelete = null;
 const db = { prepare(sql) { return { bind(...values) { return {
   async first() { return sqlite.prepare(sql).get(...values) ?? null; },
   async all() { return { results: sqlite.prepare(sql).all(...values) }; },
-  async run() { return { meta: { changes: Number(sqlite.prepare(sql).run(...values).changes) } }; },
+  async run() { if (beforeDelete && sql.includes('DELETE FROM provider_connections')) { const f=beforeDelete; beforeDelete=null; f(); } return { meta: { changes: Number(sqlite.prepare(sql).run(...values).changes) } }; },
 }; } }; } };
 sqlite.exec("INSERT INTO users(id,username) VALUES('alice','alice'),('bob','bob')");
 const key = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
@@ -24,9 +25,11 @@ const env = { DB: db, KOVA_CREDENTIAL_KEY: key, KOVA_EXPERIMENTAL_V2: 'enabled' 
 const request = (token, c = connection, path = '/v2/google-drive/files', method = 'GET') => new Request(`https://worker.test${path}?connection=${c}&parent=root`, { method, headers: token ? { authorization: `Bearer ${token}` } : {} });
 const originalFetch = globalThis.fetch;
 const requests = [];
+let mode = 'list';
 globalThis.fetch = async (url, options) => {
   requests.push({ url: String(url), options });
   if (String(url) === 'https://oauth2.googleapis.com/token') return Response.json({ access_token: 'test-access' });
+  if (mode === 'range') return new Response('llo', { status:206, headers:{ 'content-range':'bytes 2-4/5', 'content-length':'3' } });
   return Response.json({ files: [{ id: 'doc', name: 'Document', mimeType: 'text/plain' }] });
 };
 try {
@@ -69,6 +72,25 @@ try {
   assert.equal(requests[0].options.body.get('refresh_token'), 'test-refresh');
   assert.equal(requests[1].options.headers.authorization, 'Bearer test-access');
   assert.equal(new URL(requests[1].url).searchParams.has('connection'), false);
+  mode = 'range';
+  const rangeRequest = new Request(`https://worker.test/v2/google-drive/file?connection=${connection}&id=file-1`, { headers:{authorization:`Bearer ${alice}`,range:'bytes=2-4'} });
+  response = await handleRequest(rangeRequest, env);
+  assert.equal(response.status, 206);
+  assert.equal(response.headers.get('content-range'), 'bytes 2-4/5');
+  assert.equal(await response.text(), 'llo');
+  assert.equal(requests.at(-1).options.headers.range, 'bytes=2-4');
+  const disconnect = (who, id) => new Request(`https://worker.test/v2/connections?id=${id}`, {method:'DELETE',headers:{authorization:`Bearer ${who}`}});
+  assert.equal((await handleRequest(disconnect(bob, connection), env)).status, 404);
+  assert.equal((await handleRequest(disconnect(alice, 'bad'), env)).status, 400);
+  const raceSession = await issueSession(db, 'alice', Math.floor(Date.now()/1000)+600);
+  const raceHash = await hashSessionToken(raceSession);
+  beforeDelete=()=>sqlite.prepare('UPDATE sessions SET revoked_at=? WHERE token_hash=?').run(Math.floor(Date.now()/1000),raceHash);
+  assert.equal((await handleRequest(disconnect(raceSession, connection), env)).status, 404, 'revocation during delete must prevent mutation');
+  assert.ok(sqlite.prepare('SELECT id FROM provider_connections WHERE id=?').get(connection));
+  response = await handleRequest(disconnect(alice, connection), env);
+  assert.deepEqual(await response.json(), {ok:true,providerRevoked:false});
+  assert.equal((await handleRequest(disconnect(alice, connection), env)).status, 404);
+  assert.ok(sqlite.prepare('SELECT id FROM provider_connections WHERE id=?').get(bobConnection));
   response = await handleRequest(request(alice, connection, '/v2/me'), { ...env, KOVA_CREDENTIAL_KEY: undefined });
   assert.deepEqual(await response.json(), { id: 'alice' });
   assert.equal((await handleRequest(request(alice, connection, '/v2/me'), { ...env, DB: { prepare() { throw Error('secret-db-details'); } } })).status, 503);
@@ -79,10 +101,10 @@ try {
   assert.equal((await handleRequest(request(alice, connection, '/v2/me'), env)).status, 200, 'logout must not revoke another user');
   await revokeSession(db, alice);
   assert.equal((await handleRequest(request(alice), env)).status, 401);
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 4);
   const alice2 = await issueSession(db, 'alice', Math.floor(Date.now()/1000)+600);
   sqlite.exec("UPDATE users SET disabled=1 WHERE id='alice'");
   assert.equal((await handleRequest(request(alice2), env)).status, 401);
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 4);
   console.log('Experimental connected-drive session isolation tests passed');
 } finally { globalThis.fetch = originalFetch; sqlite.close(); }

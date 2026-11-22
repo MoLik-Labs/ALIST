@@ -1,7 +1,7 @@
 // Unexposed-by-default end-to-end experiment, not a Kova-compatible API.
 // Sessions must originate from a trusted login flow; no such flow exists yet.
-import { authenticateSession, revokeSession } from './sessions.js';
-import { readGoogleConnection } from './credential-vault.js';
+import { authenticateSession, revokeSession, hashSessionToken } from './sessions.js';
+import { readGoogleConnection, deleteGoogleConnection } from './credential-vault.js';
 import { googleDriveRequest } from './google-drive.js';
 
 const json = (status, data) => new Response(JSON.stringify(data), { status, headers: {
@@ -19,7 +19,7 @@ export async function connectedDriveRequest(request, env) {
   const logout = url.pathname === '/v2/logout';
   const connections = url.pathname === '/v2/connections';
   if (!drive && !me && !logout && !connections) return fail(404, 'Not found');
-  if ((logout && request.method !== 'POST') || (!logout && request.method !== 'GET')) return fail(405, 'Method not allowed');
+  if ((logout && request.method !== 'POST') || (!logout && request.method !== 'GET' && !(connections && request.method === 'DELETE'))) return fail(405, 'Method not allowed');
   if (!env.DB || (drive && typeof env.KOVA_CREDENTIAL_KEY !== 'string')) return fail(503, 'Experimental backend is not configured');
   const token = sessionHeader.exec(request.headers.get('authorization') || '')?.[1];
   if (!token) return fail(401, 'Unauthorized');
@@ -29,6 +29,14 @@ export async function connectedDriveRequest(request, env) {
     const userId = await authenticateSession(env.DB, token);
     if (!userId) return fail(401, 'Unauthorized');
     if (me) return json(200, { id: userId });
+    if (connections && request.method === 'DELETE') {
+      const ids = url.searchParams.getAll('id');
+      if (ids.length !== 1 || !connectionId.test(ids[0])) return fail(400, 'Invalid request');
+      const deleted = await deleteGoogleConnection(env.DB, userId, ids[0], await hashSessionToken(token));
+      // Deletion removes the stored refresh token locally; it does not revoke
+      // Google's grant or terminate downloads already in progress.
+      return deleted ? json(200, { ok: true, providerRevoked: false }) : fail(404, 'Not found');
+    }
     if (connections) {
       const cursors = url.searchParams.getAll('cursor');
       if (cursors.length > 1 || (cursors.length === 1 && !connectionId.test(cursors[0]))) return fail(400, 'Invalid request');
@@ -57,7 +65,7 @@ export async function connectedDriveRequest(request, env) {
       GOOGLE_CLIENT_ID: credentials.clientId,
       GOOGLE_CLIENT_SECRET: credentials.clientSecret,
       GOOGLE_REFRESH_TOKEN: credentials.refreshToken,
-    });
+    }, request.headers);
   } catch {
     return fail(503, 'Experimental backend unavailable');
   }

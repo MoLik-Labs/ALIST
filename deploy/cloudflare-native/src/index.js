@@ -43,7 +43,7 @@ export async function handleRequest(request, env) {
   if (request.method !== 'GET' && request.method !== 'PUT') return json(405, { error: 'Method not allowed' });
   if (url.pathname.startsWith('/v1/google-drive/')) {
     if (request.method !== 'GET') return json(405, { error: 'Method not allowed' });
-    return googleDriveRequest(url, env);
+    return googleDriveRequest(url, env, request.headers);
   }
   if (!env.R2) return json(503, { error: 'R2 is not configured' });
   try {

@@ -60,7 +60,7 @@ The isolated Worker also has a **single-account, read-only prototype**:
 same bearer token as the R2 API and do not require the R2 binding. Anyone with
 that token can access **all files authorized to the connected Google account**,
 not just one folder. Native Google Docs, Sheets and Slides require export and
-are not supported. Upload, search, range/resume, shortcuts, OAuth consent UI,
+are not supported. Upload, search, multipart ranges, shortcuts, OAuth consent UI,
 per-user credentials, permissions, credential revocation, rate limiting and
 multi-drive management are not implemented. There is no Kova UI integration.
 
@@ -75,7 +75,9 @@ token is not guaranteed to remain valid. Consult Google's
 [web server OAuth guide](https://developers.google.com/identity/protocols/oauth2/web-server)
 and [Drive scope guide](https://developers.google.com/workspace/drive/api/guides/api-specific-auth).
 This code refreshes on every request; it does not cache tokens or retry quota
-errors. It fixes upstream hosts and rejects redirects, strips upstream headers,
+errors. Binary downloads support one validated byte range for resuming; Google
+may ignore the range and respond with the full file. It fixes upstream hosts and
+rejects redirects, strips upstream headers,
 limits JSON responses, and never returns credentials in errors. Downloads have a
 30-second deadline; large files and redirects may fail. **Mocks only:** this has
 not been exercised against a real Google account or deployed Worker. Do not use
@@ -160,13 +162,15 @@ The opt-in `/v2/google-drive/files?connection=...` and
 D1 binding `DB`, and a separate vault key. `/v2/me` and `POST /v2/logout`
 validate or revoke the same bearer session. `/v2/connections` lists only the
 current user's connection IDs, provider names and creation times, up to 50 per
-page with `nextCursor`; encrypted credentials are not returned. Only the enabled
-connection owner is allowed; a user ID from the request is never trusted. The route refreshes the
+page with `nextCursor`; encrypted credentials are not returned.
+`DELETE /v2/connections?id=...` removes an owner's stored connection locally
+with an atomic live-session check; it does not revoke the Google authorization
+or cancel an in-flight download. Only the enabled connection owner is allowed; a user ID from the request is never trusted. The route refreshes the
 owner's Google token and uses the same limited read-only connector. It is tested
 with mock Google responses and local workerd/D1 emulation only.
 
 **Do not enable or deploy for users:** there is no production-ready login,
-account provisioning, consent UI, connection management/revocation, D1 migration
+account provisioning, consent UI, provider-side credential revocation, D1 migration
 deployment, durable throttling or UI, and no real provider test. It does not implement
 roles, resource sharing or Kova API compatibility. The test harness seeds users,
 sessions and connections directly and is not part of the Worker. The v1 shared
