@@ -1,0 +1,45 @@
+import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
+import { readFile } from 'node:fs/promises';
+import { createGoogleConnection, readGoogleConnection, deleteGoogleConnection } from '../deploy/cloudflare-native/src/credential-vault.js';
+const sqlite = new DatabaseSync(':memory:');
+for (const name of ['0001_access_foundation.sql', '0004_connections.sql']) sqlite.exec(await readFile(new URL(`../deploy/cloudflare-native/migrations/${name}`, import.meta.url), 'utf8'));
+const db = { prepare(sql) { return { bind(...values) { return {
+  async first() { return sqlite.prepare(sql).get(...values) ?? null; },
+  async run() { return { meta: { changes: Number(sqlite.prepare(sql).run(...values).changes) } }; },
+}; } }; } };
+sqlite.exec("INSERT INTO users(id,username,disabled) VALUES('alice','alice',0),('bob','bob',0),('disabled','disabled',1)");
+const key = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+const otherKey = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+const creds = { clientId: 'client-id', clientSecret: 'client-secret', refreshToken: 'refresh-secret' };
+assert.equal(await createGoogleConnection(db, key, 'disabled', creds, 1000), null);
+assert.equal(await createGoogleConnection(db, key, 'alice', { ...creds, refreshToken: '' }, 1000), null);
+assert.equal(await createGoogleConnection(db, key, 'alice', { ...creds, clientId: '💾'.repeat(1025) }, 1000), null);
+await assert.rejects(createGoogleConnection(db, 'not-a-valid-key', 'alice', creds, 1000));
+const id = await createGoogleConnection(db, key, 'alice', creds, 1000);
+const id2 = await createGoogleConnection(db, key, 'alice', creds, 1000);
+assert.notEqual(id, id2);
+const row = sqlite.prepare('SELECT * FROM provider_connections WHERE id=?').get(id);
+assert.ok(!JSON.stringify(row).includes('client-secret'));
+assert.ok(!JSON.stringify(row).includes('refresh-secret'));
+assert.equal(row.provider, 'google_drive');
+assert.deepEqual(await readGoogleConnection(db, key, 'alice', id), creds);
+assert.equal(await readGoogleConnection(db, key, 'bob', id), null);
+await assert.rejects(readGoogleConnection(db, otherKey, 'alice', id), /Unable to open provider credentials/);
+assert.equal(await deleteGoogleConnection(db, 'bob', id), false);
+sqlite.prepare('UPDATE provider_connections SET owner_id=? WHERE id=?').run('bob', id);
+await assert.rejects(readGoogleConnection(db, key, 'bob', id), /Unable to open provider credentials/, 'owner must be authenticated by AAD');
+sqlite.prepare('UPDATE provider_connections SET owner_id=?,ciphertext=? WHERE id=?').run('alice', row.ciphertext.slice(0, -1) + (row.ciphertext.endsWith('A') ? 'B' : 'A'), id);
+await assert.rejects(readGoogleConnection(db, key, 'alice', id), /Unable to open provider credentials/);
+sqlite.prepare('UPDATE provider_connections SET ciphertext=? WHERE id=?').run(row.ciphertext, id);
+sqlite.exec("UPDATE users SET disabled=1 WHERE id='alice'");
+assert.equal(await readGoogleConnection(db, key, 'alice', id), null);
+assert.equal(await deleteGoogleConnection(db, 'alice', id), false);
+sqlite.exec("UPDATE users SET disabled=0 WHERE id='alice'");
+assert.equal(await deleteGoogleConnection(db, 'alice', id), true);
+assert.equal(await readGoogleConnection(db, key, 'alice', id), null);
+const escaped = { clientId: '\\'.repeat(4096), clientSecret: '"'.repeat(4096), refreshToken: '\\'.repeat(4096) };
+const escapedId = await createGoogleConnection(db, key, 'alice', escaped, 1000);
+assert.deepEqual(await readGoogleConnection(db, key, 'alice', escapedId), escaped);
+sqlite.close();
+console.log('Experimental encrypted credential vault SQLite tests passed');

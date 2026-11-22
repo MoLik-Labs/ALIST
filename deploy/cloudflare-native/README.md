@@ -128,3 +128,22 @@ Workers Web Crypto has an implementation limit on PBKDF2 iterations; see the
 silently reduce password-hash strength or assume a local test proves production
 limits. Choose and test an appropriate authentication design before wiring a
 login flow to session issuance.
+
+## Credential-vault foundation (not integrated)
+
+The experimental `0004_connections.sql` and `src/credential-vault.js` store a
+single owner's Google credentials in D1 using AES-256-GCM. Random 96-bit nonces
+and authenticated connection ID, owner and provider bind ciphertext to its
+record. Only the enabled owner is authorized by these isolated primitives;
+actor identity must come from a trusted authentication layer, not client input.
+Tests cover ciphertext tampering, owner changes, disabled users and isolated
+workerd/D1 emulation. They do not constitute a security review or test real D1.
+
+No HTTP route, Google connector or UI uses this vault; the existing prototype
+still uses one account-level bearer secret and must not be treated as multi-user.
+Key provisioning, key versioning/rotation, safe backup/recovery, audit, OAuth
+consent/revocation, deletion semantics at Google and grant-based sharing are not
+implemented. Losing the separate master key makes encrypted credentials
+unrecoverable. A deployment operator able to alter Worker code or access the
+key can access credentials; this is not end-to-end encryption. Do not store
+production secrets until the complete system is reviewed and tested.
