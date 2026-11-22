@@ -22,14 +22,17 @@ The standalone documentation website is in [`docs/site`](docs/site/). Serve that
 
 ## Quick deployment
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2FMoLik-Labs%2FALIST)
-[![Deploy Cloudflare edge proxy](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FMoLik-Labs%2FALIST%2Ftree%2FBETA%2Fdeploy%2Fcloudflare-worker)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2FMoLik-Labs%2FKova-INC)
+[![Deploy Cloudflare edge proxy](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FMoLik-Labs%2FKova-INC%2Ftree%2FBETA%2Fdeploy%2Fcloudflare-worker)
 
 Cloudflare's button requires a public repository, and Render users need access
 to the repository. Buttons use `BETA`,
 so changes in an unmerged branch are not included. Cloudflare deploys only the
 edge proxy; it needs a separate HTTPS origin and `KOVA_ORIGIN` secret. Render
-creates a paid persistent disk; review the plan and costs before confirming.
+creates a paid persistent disk and generates an initial admin password; review
+the plan and costs before confirming and retrieve the password from Render
+service environment settings. These links target the upstream repository, not
+your fork; for a fork select your repository in the provider dashboard.
 See the [platform deployment guide](docs/platform-deployment.md) for Railway,
 Fly.io, Heroku, persistence, backup, scaling and first-start instructions.
 

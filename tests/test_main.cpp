@@ -409,6 +409,24 @@ void test_database_vault_and_fts5() {
     CHECK(db.init(db_path, "vault-master-secret-key-2026", &init_pw));
     CHECK(!init_pw.empty());
 
+    // Platform-supplied bootstrap secrets authenticate but are not returned for logging.
+    const char* old_env = std::getenv("ALIST_ADMIN_PASSWORD");
+    const std::optional<std::string> previous_password = old_env ? std::optional<std::string>(old_env) : std::nullopt;
+    CHECK(setenv("ALIST_ADMIN_PASSWORD", "TestBootstrapSecret-not-for-production", 1) == 0);
+    {
+        ScopeExit restore_env([&] {
+            if (previous_password) setenv("ALIST_ADMIN_PASSWORD", previous_password->c_str(), 1);
+            else unsetenv("ALIST_ADMIN_PASSWORD");
+        });
+        Database secret_db;
+        std::string logged_password;
+        CHECK(secret_db.init(dir + "/secret.db", "vault-master-secret-key-2026", &logged_password));
+        CHECK(logged_password.empty());
+        auto seeded = secret_db.get_admin_user();
+        CHECK(seeded.has_value());
+        CHECK(verify_password_pbkdf2("TestBootstrapSecret-not-for-production", seeded->password_hash));
+    }
+
     StorageRecord st;
     st.mount_path = "/s3test";
     st.driver = "S3";

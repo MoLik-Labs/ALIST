@@ -4,12 +4,15 @@ This Worker is a **reverse proxy to an already-running Kova origin**. It does no
 
 ## Deploy
 
-[![Deploy Cloudflare edge proxy](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FMoLik-Labs%2FALIST%2Ftree%2FBETA%2Fdeploy%2Fcloudflare-worker)
+[![Deploy Cloudflare edge proxy](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FMoLik-Labs%2FKova-INC%2Ftree%2FBETA%2Fdeploy%2Fcloudflare-worker)
 
 The button requires a public repository and deploys only this proxy. It uses
 the `BETA` branch. You still need a
 running HTTPS origin and the `KOVA_ORIGIN` secret; without it the Worker returns
 503. The button flow has not been verified against a real Cloudflare account.
+To deploy your fork instead, connect it through Workers Builds, select its
+branch, and set the root directory to `deploy/cloudflare-worker`. Set
+`KOVA_ORIGIN` as a runtime secret, not just a build-time secret.
 
 
 1. Deploy the main Kova container and confirm its `/ping` endpoint works. Keep `/opt/alist/data` on persistent storage; it contains the SQLite database, signing key, and account/storage configuration.

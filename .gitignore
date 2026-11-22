@@ -30,3 +30,7 @@ compile_commands.json
 /node_modules/
 /deploy/cloudflare-worker/node_modules/
 /deploy/cloudflare-worker/.dev.vars
+/deploy/cloudflare-worker/.dev.vars.*
+!/deploy/cloudflare-worker/.dev.vars.example
+/deploy/cloudflare-worker/.env
+/deploy/cloudflare-worker/.env.*

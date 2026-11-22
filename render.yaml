@@ -5,13 +5,15 @@ services:
   - type: web
     name: kova
     runtime: docker
-    autoDeployTrigger: off
+    autoDeployTrigger: 'off'
     plan: starter
     region: singapore
     healthCheckPath: /ping
     dockerfilePath: ./Dockerfile
     dockerContext: .
     envVars:
+      - key: ALIST_ADMIN_PASSWORD
+        generateValue: true
       - key: PUID
         value: "10001"
       - key: PGID
