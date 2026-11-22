@@ -63,12 +63,16 @@ export async function googleDriveRequest(url, env, requestHeaders = new Headers(
   const list = url.pathname === '/v1/google-drive/files';
   const download = url.pathname === '/v1/google-drive/file';
   if (!list && !download) return error(404, 'Not found');
-  const id = url.searchParams.get(list ? 'parent' : 'id') || (list ? 'root' : '');
+  const idName = list ? 'parent' : 'id';
+  const id = url.searchParams.get(idName) || (list ? 'root' : '');
   const cursor = url.searchParams.get('cursor') || '';
+  const name = list ? url.searchParams.get('name') : null;
   const range = download ? parseRange(requestHeaders.get('range')) : null;
   if (range === false) return error(400, 'Invalid Range header');
-  // Restrict IDs before interpolating the Drive query and encoding path segments.
-  if (!validId(id) || cursor.length > 2048 || /[\x00-\x1f\x7f]/.test(cursor)) return error(400, 'Invalid request');
+  // Reject ambiguous inputs and escape user text before embedding it in a Drive query.
+  if (url.searchParams.getAll(idName).length > 1 || url.searchParams.getAll('cursor').length > 1 ||
+      (list && url.searchParams.getAll('name').length > 1) || !validId(id) || cursor.length > 2048 || /[\x00-\x1f\x7f]/.test(cursor) ||
+      (name !== null && (!name || name.length > 200 || /[\x00-\x1f\x7f]/.test(name)))) return error(400, 'Invalid request');
   const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN } = env;
   if (![GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN].every(validSecret)) return error(503, 'Google Drive is not configured');
   try {
@@ -82,7 +86,9 @@ export async function googleDriveRequest(url, env, requestHeaders = new Headers(
     if (!validSecret(token) || /\s/.test(token)) return error(502, 'Google authorization failed');
     const target = new URL(list ? DRIVE_URL : `${DRIVE_URL}/${encodeURIComponent(id)}`);
     if (list) {
-      target.searchParams.set('q', `'${id}' in parents and trashed = false`);
+      let query = `'${id}' in parents and trashed = false`;
+      if (name !== null) query += ` and name contains '${name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+      target.searchParams.set('q', query);
       target.searchParams.set('fields', 'nextPageToken,files(id,name,mimeType,size,modifiedTime)');
       target.searchParams.set('pageSize', '100');
       target.searchParams.set('supportsAllDrives', 'true');

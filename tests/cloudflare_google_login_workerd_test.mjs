@@ -15,7 +15,10 @@ const key = '${key}'; let nonce;
 const encode = x => btoa(JSON.stringify(x)).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');
 globalThis.fetch = async (url, options) => {
  if (String(url)==='https://www.googleapis.com/oauth2/v3/certs') return Response.json({keys:[${JSON.stringify(publicKey)}]});
- if (String(url).startsWith('https://www.googleapis.com/drive/v3/files?')) return Response.json({files:[{id:'f',name:'My file',mimeType:'text/plain'}]});
+ if (String(url).startsWith('https://www.googleapis.com/drive/v3/files?')) {
+  if (new URL(url).searchParams.get('q') !== "'root' in parents and trashed = false and name contains 'My'") throw Error('unexpected query');
+  return Response.json({files:[{id:'f',name:'My file',mimeType:'text/plain'}]});
+ }
  if (String(url).startsWith('https://www.googleapis.com/drive/v3/files/f?')) {
   if (options.headers.range !== 'bytes=2-4') throw Error('missing range');
   return new Response('cde',{status:206,headers:{'content-range':'bytes 2-4/6','content-length':'3'}});
@@ -38,7 +41,7 @@ export default {async fetch(req,env){
  const connection=await createGoogleConnection(env.DB,key,'alice',{clientId:'client',clientSecret:'secret',refreshToken:'synthetic-refresh'});
  const connections=await handleRequest(new Request('https://worker.test/v2/connections',{headers:{authorization:'Bearer '+data.token}}),config);
  const listData=await connections.json();
- const drive=await handleRequest(new Request('https://worker.test/v2/google-drive/files?connection='+connection,{headers:{authorization:'Bearer '+data.token}}),config);
+ const drive=await handleRequest(new Request('https://worker.test/v2/google-drive/files?connection='+connection+'&name=My',{headers:{authorization:'Bearer '+data.token}}),config);
  const listing=await drive.json();
  const part=await handleRequest(new Request('https://worker.test/v2/google-drive/file?connection='+connection+'&id=f',{headers:{authorization:'Bearer '+data.token,range:'bytes=2-4'}}),config);
  const rangeResult={status:part.status,range:part.headers.get('content-range'),body:await part.text()};

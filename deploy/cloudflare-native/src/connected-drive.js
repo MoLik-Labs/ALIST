@@ -1,5 +1,5 @@
 // Unexposed-by-default end-to-end experiment, not a Kova-compatible API.
-// Sessions must originate from a trusted login flow; no such flow exists yet.
+// Session login remains experimental and requires pre-provisioned identities.
 import { authenticateSession, revokeSession, hashSessionToken } from './sessions.js';
 import { readGoogleConnection, deleteGoogleConnection } from './credential-vault.js';
 import { googleDriveRequest } from './google-drive.js';
@@ -24,7 +24,7 @@ export async function connectedDriveRequest(request, env) {
   const token = sessionHeader.exec(request.headers.get('authorization') || '')?.[1];
   if (!token) return fail(401, 'Unauthorized');
   const connection = drive ? url.searchParams.get('connection') : null;
-  if (drive && (!connection || !connectionId.test(connection))) return fail(400, 'Invalid request');
+  if (drive && (url.searchParams.getAll('connection').length !== 1 || !connection || !connectionId.test(connection))) return fail(400, 'Invalid request');
   try {
     const userId = await authenticateSession(env.DB, token);
     if (!userId) return fail(401, 'Unauthorized');

@@ -55,12 +55,15 @@ account bindings, resource limits or real R2 behavior. Stop the server when done
 
 The isolated Worker also has a **single-account, read-only prototype**:
 `GET /v1/google-drive/files?parent=root` lists a folder (optional opaque
-`cursor`; the response has `nextPageToken`) and
+`cursor`; the response has `nextPageToken`). An optional `name` filters by
+Google Drive's `name contains` semantics within that folder; it is not a
+recursive or full-text search. Use the same filter and parent when paging. The
+owner-scoped v2 listing accepts the same filter. Additionally,
 `GET /v1/google-drive/file?id=...` streams a binary file. These routes use the
 same bearer token as the R2 API and do not require the R2 binding. Anyone with
 that token can access **all files authorized to the connected Google account**,
 not just one folder. Native Google Docs, Sheets and Slides require export and
-are not supported. Upload, search, multipart ranges, shortcuts, OAuth consent UI,
+are not supported. Upload, recursive/full-text search, multipart ranges, shortcuts, OAuth consent UI,
 per-user credentials, permissions, credential revocation, rate limiting and
 multi-drive management are not implemented. There is no Kova UI integration.
 

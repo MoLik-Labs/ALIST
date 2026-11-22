@@ -41,6 +41,14 @@ try {
   assert.equal(target.searchParams.get('pageToken'), 'opaque+next');
   assert.equal(requests[1].options.headers.authorization, 'Bearer access-secret');
   assert.equal(requests[1].options.redirect, 'manual');
+  response = await handleRequest(makeRequest('/v1/google-drive/files?parent=root&name=' + encodeURIComponent("a' or name contains 'x\\y")), env);
+  assert.equal(response.status, 200);
+  assert.equal(new URL(requests.at(-1).url).searchParams.get('q'), "'root' in parents and trashed = false and name contains 'a\\' or name contains \\'x\\\\y'");
+  const beforeBadQuery = requests.length;
+  for (const path of ['/v1/google-drive/files?name=', '/v1/google-drive/files?name=a&name=b', '/v1/google-drive/files?parent=root&parent=other', '/v1/google-drive/files?name=%0A', '/v1/google-drive/files?name=' + 'a'.repeat(201), '/v1/google-drive/files?cursor=a&cursor=b']) {
+    assert.equal((await handleRequest(makeRequest(path), env)).status, 400, path);
+  }
+  assert.equal(requests.length, beforeBadQuery, 'invalid search must not contact Google');
   mode = 'download';
   // The header deadline must be cleared once streaming can begin; otherwise
   // an otherwise healthy download is aborted after 30 seconds.

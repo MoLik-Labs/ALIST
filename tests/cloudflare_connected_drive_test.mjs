@@ -72,6 +72,11 @@ try {
   assert.equal(requests[0].options.body.get('refresh_token'), 'test-refresh');
   assert.equal(requests[1].options.headers.authorization, 'Bearer test-access');
   assert.equal(new URL(requests[1].url).searchParams.has('connection'), false);
+  const search = who => new Request(`https://worker.test/v2/google-drive/files?connection=${connection}&name=Doc`, {headers:{authorization:`Bearer ${who}`}});
+  assert.equal((await handleRequest(search(bob), env)).status, 404);
+  assert.equal((await handleRequest(search(alice), env)).status, 200);
+  assert.equal(new URL(requests.at(-1).url).searchParams.get('q'), "'root' in parents and trashed = false and name contains 'Doc'");
+  assert.equal((await handleRequest(new Request(`https://worker.test/v2/google-drive/files?connection=${connection}&connection=${bobConnection}`, {headers:{authorization:`Bearer ${alice}`}}),env)).status, 400);
   mode = 'range';
   const rangeRequest = new Request(`https://worker.test/v2/google-drive/file?connection=${connection}&id=file-1`, { headers:{authorization:`Bearer ${alice}`,range:'bytes=2-4'} });
   response = await handleRequest(rangeRequest, env);
@@ -101,10 +106,10 @@ try {
   assert.equal((await handleRequest(request(alice, connection, '/v2/me'), env)).status, 200, 'logout must not revoke another user');
   await revokeSession(db, alice);
   assert.equal((await handleRequest(request(alice), env)).status, 401);
-  assert.equal(requests.length, 4);
+  assert.equal(requests.length, 6);
   const alice2 = await issueSession(db, 'alice', Math.floor(Date.now()/1000)+600);
   sqlite.exec("UPDATE users SET disabled=1 WHERE id='alice'");
   assert.equal((await handleRequest(request(alice2), env)).status, 401);
-  assert.equal(requests.length, 4);
+  assert.equal(requests.length, 6);
   console.log('Experimental connected-drive session isolation tests passed');
 } finally { globalThis.fetch = originalFetch; sqlite.close(); }
