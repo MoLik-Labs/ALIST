@@ -27,3 +27,5 @@ After sign-in, select a connection to browse folders and use **Load more** for t
 Multi-user experiments require a separate Worker, separate D1 with migrations, separate vault key, configured OAuth and pre-provisioned identities. See the `deploy/cloudflare-native/README.md` in your repository and branch for bindings, variables, limitations and risks. Never attach experimental configuration to a production Worker or data. Enable experimental flags only in isolation; v1 uses a shared token with access to the whole provider account and is not a multi-user boundary.
 
 Before real use the project still needs a security-reviewed login, abuse protection, key recovery, permissions/sharing, additional drivers, real browser and cloud-resource tests. If CSS or JS does not load, check `GET /`, `/app.css`, `/app.js`, the `ASSETS` binding, build configuration and CSP; do not publish the entire repository.
+
+To test D1 and deploy a **separate** experimental Worker after the code reaches your fork, see the [isolated step-by-step guide](./cloudflare-isolated). Do not use the local config on an existing Worker.

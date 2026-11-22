@@ -134,6 +134,7 @@ jobs:
       - name: Validate Cloudflare Worker bundle with Wrangler
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
+          node ../../tests/cloudflare_isolated_config_test.mjs
           node ../../tests/cloudflare_access_workerd_test.mjs
           node ../../tests/cloudflare_sessions_workerd_test.mjs
           node ../../tests/cloudflare_user_management_workerd_test.mjs

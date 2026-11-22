@@ -27,3 +27,5 @@ Sau đăng nhập, chọn kết nối để duyệt thư mục; nút **Xem thêm
 Để thử nhiều người dùng cần Worker riêng, D1 riêng với migrations, vault key riêng và cấu hình OAuth cùng định danh được cấp trước. Xem `deploy/cloudflare-native/README.md` trong repository và nhánh bạn chọn về bindings, biến, giới hạn và rủi ro. Không trỏ cấu hình thử nghiệm vào Worker hoặc dữ liệu production. Chỉ bật các flag thử nghiệm trong môi trường cô lập; v1 dùng token chung có quyền trên toàn bộ dữ liệu nhà cung cấp và không phải bảo mật đa người dùng.
 
 Trước khi dùng thật vẫn cần hoàn thiện và rà soát bảo mật đăng nhập, bảo vệ chống lạm dụng, phục hồi khóa, phân quyền/chia sẻ, các driver, kiểm thử trình duyệt và kiểm thử tài nguyên thực tế. Nếu giao diện không tải CSS/JS, kiểm tra `GET /`, `/app.css`, `/app.js`, binding `ASSETS`, cấu hình build và CSP; không đăng tải toàn bộ repository.
+
+Để kiểm tra D1 và deploy một Worker thử nghiệm **riêng** sau khi mã có trong fork, xem [hướng dẫn cô lập từng bước](./cloudflare-isolated). Không dùng cấu hình local cho Worker đang chạy.
