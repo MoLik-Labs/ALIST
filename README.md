@@ -86,9 +86,9 @@ heroku stack:set container -a <app-name>
 git push heroku HEAD:main
 ```
 
-Heroku supplies `PORT`, which Kova reads automatically. **The standard Heroku dyno filesystem is ephemeral.** Kova stores its SQLite database, signing key, users, and storage configuration in `/opt/alist/data`; this setup is suitable only for demos/testing unless you provide a persistent volume through your hosting arrangement. Do not rely on a standard dyno filesystem for durable production data. For a straightforward persistent deployment, use Render with the included disk or another container host with a writable persistent volume.
+Heroku supplies `PORT`, which Kova reads automatically. **The standard Heroku dyno filesystem is ephemeral.** Without an explicit `ALIST_DATA_DIR`, the container creates a private temporary data directory for its non-root user on each start; the SQLite database, signing key, users, and storage configuration are lost on restart. This is suitable only for demos/testing. Do not rely on a standard dyno filesystem for durable production data. For a straightforward persistent deployment, use Render with the included disk or another container host with a writable persistent volume.
 
-For other container platforms, keep `/opt/alist/data` on persistent storage, expose the port the service injects through `PORT` (or configure `ALIST_HTTP_PORT`), and ensure the volume is writable by the configured `PUID`/`PGID`.
+For other container platforms, keep `/opt/alist/data` on persistent storage, expose the port the service injects through `PORT` (or configure `ALIST_HTTP_PORT`), and ensure the volume is writable by the configured `PUID`/`PGID`. For a container started as a non-root UID, set ownership on the volume for that UID; PUID/PGID cannot change it. An explicit `ALIST_DATA_DIR` overrides the data path, and custom directories must already be writable by the runtime user.
 
 ### Cloudflare Worker edge proxy
 
