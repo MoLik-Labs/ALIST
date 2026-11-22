@@ -32,11 +32,13 @@ export default {async fetch(req,env){
  const finish=await handleRequest(callback(),config); const data=await finish.json();
  const me=await handleRequest(new Request('https://worker.test/v2/me',{headers:{authorization:'Bearer '+data.token}}),config);
  const connection=await createGoogleConnection(env.DB,key,'alice',{clientId:'client',clientSecret:'secret',refreshToken:'synthetic-refresh'});
+ const connections=await handleRequest(new Request('https://worker.test/v2/connections',{headers:{authorization:'Bearer '+data.token}}),config);
+ const listData=await connections.json();
  const drive=await handleRequest(new Request('https://worker.test/v2/google-drive/files?connection='+connection,{headers:{authorization:'Bearer '+data.token}}),config);
  const listing=await drive.json();
  const logout=await handleRequest(new Request('https://worker.test/v2/logout',{method:'POST',headers:{authorization:'Bearer '+data.token}}),config);
  const after=await handleRequest(new Request('https://worker.test/v2/me',{headers:{authorization:'Bearer '+data.token}}),config);
- return Response.json({start:start.status,finish:finish.status,me:await me.json(),drive:drive.status,listing,logout:logout.status,after:after.status,replay:(await handleRequest(callback(),config)).status});
+ return Response.json({start:start.status,finish:finish.status,me:await me.json(),connections:connections.status,connectionListed:listData.connections.length === 1 && listData.connections[0].id === connection && listData.connections[0].provider === 'google_drive',drive:drive.status,listing,logout:logout.status,after:after.status,replay:(await handleRequest(callback(),config)).status});
 }};`;
 modules.unshift({type:'ESModule',path:`${process.cwd()}/entry.js`,contents:harness});
 const mf=new Miniflare(convertV4MiniflareOptions({modules,compatibilityDate:'2026-11-16',d1Databases:['DB']}));
@@ -48,6 +50,6 @@ try {
  }
  await db.batch([db.prepare("INSERT INTO users(id,username) VALUES('alice','alice')"),db.prepare("INSERT INTO external_identities VALUES('google','google-subject','alice')")]);
  const response=await mf.dispatchFetch('http://localhost/test'); assert.equal(response.status,200);
- assert.deepEqual(await response.json(),{start:200,finish:200,me:{id:'alice'},drive:200,listing:{files:[{id:'f',name:'My file',mimeType:'text/plain'}],nextPageToken:null},logout:200,after:401,replay:400});
+ assert.deepEqual(await response.json(),{start:200,finish:200,me:{id:'alice'},connections:200,connectionListed:true,drive:200,listing:{files:[{id:'f',name:'My file',mimeType:'text/plain'}],nextPageToken:null},logout:200,after:401,replay:400});
  console.log('Experimental Google login workerd and D1 emulator tests passed');
 } finally {await mf.dispose();}

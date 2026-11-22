@@ -158,8 +158,10 @@ production secrets until the complete system is reviewed and tested.
 The opt-in `/v2/google-drive/files?connection=...` and
 `/v2/google-drive/file?connection=...&id=...` routes require a session token,
 D1 binding `DB`, and a separate vault key. `/v2/me` and `POST /v2/logout`
-validate or revoke the same bearer session. Only the enabled connection owner is
-allowed; a user ID from the request is never trusted. The route refreshes the
+validate or revoke the same bearer session. `/v2/connections` lists only the
+current user's connection IDs, provider names and creation times, up to 50 per
+page with `nextCursor`; encrypted credentials are not returned. Only the enabled
+connection owner is allowed; a user ID from the request is never trusted. The route refreshes the
 owner's Google token and uses the same limited read-only connector. It is tested
 with mock Google responses and local workerd/D1 emulation only.
 

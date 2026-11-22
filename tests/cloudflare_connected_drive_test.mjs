@@ -10,12 +10,14 @@ for (const migration of ['0001_access_foundation.sql', '0002_sessions.sql', '000
   sqlite.exec(await readFile(new URL(`../deploy/cloudflare-native/migrations/${migration}`, import.meta.url), 'utf8'));
 const db = { prepare(sql) { return { bind(...values) { return {
   async first() { return sqlite.prepare(sql).get(...values) ?? null; },
+  async all() { return { results: sqlite.prepare(sql).all(...values) }; },
   async run() { return { meta: { changes: Number(sqlite.prepare(sql).run(...values).changes) } }; },
 }; } }; } };
 sqlite.exec("INSERT INTO users(id,username) VALUES('alice','alice'),('bob','bob')");
 const key = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
 const credentials = { clientId: 'test-client', clientSecret: 'test-secret', refreshToken: 'test-refresh' };
 const connection = await createGoogleConnection(db, key, 'alice', credentials);
+const bobConnection = await createGoogleConnection(db, key, 'bob', {clientId:'bob-client',clientSecret:'bob-secret',refreshToken:'bob-refresh'});
 const alice = await issueSession(db, 'alice', Math.floor(Date.now()/1000)+600);
 const bob = await issueSession(db, 'bob', Math.floor(Date.now()/1000)+600);
 const env = { DB: db, KOVA_CREDENTIAL_KEY: key, KOVA_EXPERIMENTAL_V2: 'enabled' };
@@ -36,6 +38,27 @@ try {
   assert.equal((await handleRequest(request(alice, connection, '/v2/google-drive/files', 'POST'), env)).status, 405);
   assert.equal((await handleRequest(request(alice, connection, '/v2/google-drive/bad'), env)).status, 404);
   assert.equal(requests.length, 0, 'unauthorized requests must never contact Google');
+  let listing = await handleRequest(request(alice, connection, '/v2/connections'), env);
+  assert.equal(listing.status, 200);
+  assert.equal(listing.headers.get('cache-control'), 'no-store');
+  const listText = await listing.text();
+  const items = JSON.parse(listText).connections;
+  assert.deepEqual(items.map(item => item.id), [connection]);
+  assert.equal(items[0].provider, 'google_drive');
+  assert.ok(!listText.includes(bobConnection) && !listText.includes('test-secret') && !listText.includes('ciphertext'));
+  listing = await handleRequest(request(bob, connection, '/v2/connections'), env);
+  assert.deepEqual((await listing.json()).connections.map(item => item.id), [bobConnection]);
+  assert.equal((await handleRequest(new Request('https://worker.test/v2/connections?cursor=bad',{headers:{authorization:`Bearer ${alice}`}}),env)).status,400);
+  assert.equal((await handleRequest(new Request('https://worker.test/v2/connections?cursor='+connection+'&cursor='+connection,{headers:{authorization:`Bearer ${alice}`}}),env)).status,400);
+  const insert = sqlite.prepare("INSERT INTO provider_connections (id,owner_id,provider,vault_version,nonce,ciphertext,created_at) VALUES (?,'alice','google_drive',1,'synthetic','synthetic',1)");
+  for (let i=0; i<52; i++) insert.run(`page${String(i).padStart(18,'0')}`);
+  const page1 = await (await handleRequest(request(alice, connection, '/v2/connections'), env)).json();
+  assert.equal(page1.connections.length, 50);
+  assert.equal(page1.nextCursor, page1.connections.at(-1).id);
+  const page2 = await (await handleRequest(new Request('https://worker.test/v2/connections?cursor='+page1.nextCursor,{headers:{authorization:`Bearer ${alice}`}}),env)).json();
+  assert.equal(page2.connections.length, 3);
+  assert.equal(page2.nextCursor, null);
+  assert.equal(new Set([...page1.connections,...page2.connections].map(item=>item.id)).size,53);
   let response = await handleRequest(request(alice), env);
   assert.equal(response.status, 200);
   const body = await response.text();
