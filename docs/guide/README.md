@@ -30,9 +30,12 @@ when a supported stable release addresses these advisories.
    artifact. The URL is shown by the deployment and depends on your account.
 4. For `<owner>.github.io/<repository>/`, the workflow detects the repository
    name and builds with that base. For an account site `<owner>.github.io` it
-   uses `/`. For a custom domain or other base path, set `DOCS_BASE` in the
-   build environment (for example `/` or `/manual/`) and rebuild. No absolute
-   URLs to the original repository's Pages hostname are required.
+   uses `/`. For a custom domain or other base path, add the repository Actions
+   variable `DOCS_BASE` under **Settings → Secrets and variables → Actions →
+   Variables** (for example `/` or `/manual/`), then rerun the workflow. It
+   must begin and end with `/`. Remove the variable to restore automatic base
+   detection. For local builds, set the `DOCS_BASE` environment variable instead.
+   No absolute URLs to the original repository's Pages hostname are required.
 5. Open both languages, follow the internal links and test on mobile. This site
    hosts documentation only; it does not deploy or run the Kova server.
 

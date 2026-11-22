@@ -30,6 +30,8 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run docs:build
+        env:
+          DOCS_BASE: ${{ vars.DOCS_BASE }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs/guide/.vitepress/dist
