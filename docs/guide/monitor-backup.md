@@ -39,7 +39,7 @@ The experimental tool below backs up Kova metadata only; a NodeWarden backup doe
 
 The optional `tools/backup/kova_backup.py` uses SQLite's Backup API (including WAL), encrypts with AES-256-GCM, and verifies decryption and SQLite integrity after each scheduled run. It includes **only** `data.db` and `config.json`, with limits of 64 MiB database and 1 MiB config. Local or cloud-mounted files, NodeWarden, attachments, environment variables, the backup key, and any environment-supplied `ALIST_JWT_SECRET` are excluded. If the server uses that override, protect and recover the exact secret separately or encrypted credentials cannot be recovered. `verify` is not a substitute for restoring and testing login.
 
-This standalone tool requires Python 3.11+ with `sqlite3` and `cryptography`. It is **not included in the Render image**, does not upload to cloud, and cannot run while its host sleeps. It cannot make Render Free durable. Use it only on a host that can read the live database and write to separate durable storage. Store encrypted backups off-host and keep a recovery copy of the key somewhere **separate**; losing the key makes the backups unreadable. Never commit a key or put it on Catbox or in the backup directory. Backup and restore-parent directories must be private, owned by the executing user and mode 0700. During verify/restore, a **plaintext SQLite scratch file** is written under `TMPDIR` and deleted; use a private encrypted temp filesystem and understand that deletion may not erase underlying blocks.
+This standalone tool requires Python 3.11+ with `sqlite3` and `cryptography`. It is **not included in the Render image**, can upload encrypted snapshots to a configured WebDAV server, and cannot run while its host sleeps. It cannot make Render Free durable. Use it only on a host that can read the live database and write to separate durable storage. Store encrypted backups off-host and keep a recovery copy of the key somewhere **separate**; losing the key makes the backups unreadable. Never commit a key or put it on Catbox or in the backup directory. Backup and restore-parent directories must be private, owned by the executing user and mode 0700. During verify/restore, a **plaintext SQLite scratch file** is written under `TMPDIR` and deleted; use a private encrypted temp filesystem and understand that deletion may not erase underlying blocks.
 
 From a clone with these changes, replace `/path-to-data` with the real host path (do not enter vault passwords):
 
@@ -64,3 +64,35 @@ To run daily while the host is running, run this foreground process under your h
 ```
 
 It runs immediately and then at the chosen interval in seconds (minimum 3600). Failures go to logs; there are no external alerts or automatic deletion. Monitor free space and logs; choose retention manually only after validating a newer backup. A custom DB path outside the data directory or a config changed during snapshot is rejected. Relative DB paths are interpreted against the tool's working directory: run it from the same working directory as the server. This is experimental and has not been tested with real user data or cloud services.
+
+### Send encrypted snapshots to your WebDAV
+
+Use an **existing** WebDAV directory over HTTPS with a valid trusted certificate, and a dedicated Basic account with HEAD, PUT and GET rights. The tool does not create directories, follow redirects, accept credentials/query/fragment in URLs, or disable TLS verification. Configure only a destination you trust: this is an operator-run CLI, not a public API or SSRF sandbox. Avoid using an admin account when a path-restricted account is possible. Kova WebDAV accounts with TOTP require a per-request OTP and are not compatible with this tool.
+
+Create a private credentials file outside the repository (never send credentials in chat). The following prompts in the terminal; the password is not echoed and the new file uses mode 0600 and refuses overwrite:
+
+```sh
+.venv/bin/python - <<'PY'
+import getpass, json, os
+path = os.path.expanduser('~/kova-keys/webdav.json')
+user = input('WebDAV username: ')
+password = getpass.getpass('WebDAV password: ')
+fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+with os.fdopen(fd, 'w') as f:
+    json.dump({'username': user, 'password': password}, f)
+PY
+```
+
+Replace the example URL with **your** WebDAV directory URL, without passwords or query parameters. Create a fresh uniquely named backup first, then upload it:
+
+```sh
+.venv/bin/python tools/backup/kova_backup.py upload-webdav "$HOME/kova-backups/first.kvbak" "$HOME/kova-keys/backup.key" 'https://your-webdav.example/backup-directory' "$HOME/kova-keys/webdav.json"
+```
+
+For scheduled uploads add the following **on the same line** as the `schedule` command above:
+
+```sh
+--webdav-url 'https://your-webdav.example/backup-directory' --webdav-credentials "$HOME/kova-keys/webdav.json"
+```
+
+Each run uses a fresh random filename. The tool verifies the local encrypted snapshot, checks the destination with HEAD, sends PUT with `If-None-Match: *`, then GETs and compares SHA-256 byte-for-byte. Some servers ignore conditional PUT; HEAD cannot eliminate races, so use a dedicated directory and never let clients write the same name concurrently. On upload or verification failure the local backup remains; old files are never deleted and the tool does not automatically fetch remote backups. For recovery, download ciphertext using a secure WebDAV client, then run `verify` and `restore` with the separate key. This flow has been tested with local TLS and dummy data, **not with your WebDAV server**. Do not share credentials, their file or your key with us.

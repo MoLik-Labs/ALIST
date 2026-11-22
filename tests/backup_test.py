@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Encrypted metadata backup, WAL snapshot, restore and failure regression tests."""
 import importlib.util
+import datetime
+import http.client
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import ssl
+import threading
 import json
 import os
 from pathlib import Path
@@ -10,6 +15,11 @@ import sys
 import time
 import tempfile
 import unittest
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 
 spec = importlib.util.spec_from_file_location('backup', Path(__file__).resolve().parents[1] / 'tools/backup/kova_backup.py')
 b = importlib.util.module_from_spec(spec)
@@ -87,6 +97,84 @@ class BackupTests(unittest.TestCase):
                 self.fail('scheduler did not create a valid backup')
         finally:
             p.terminate(); p.communicate(timeout=5)
+
+    def test_verified_webdav_upload_and_failures(self):
+        b.backup(self.data, self.archive, self.key)
+        creds = self.keys / 'dav.json'
+        creds.write_text(json.dumps({'username': 'test-user', 'password': 'test-password'}))
+        os.chmod(creds, 0o600)
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'localhost')])
+        cert = (x509.CertificateBuilder().subject_name(subject).issuer_name(subject).public_key(key.public_key())
+                .serial_number(x509.random_serial_number()).not_valid_before(datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=1))
+                .not_valid_after(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1))
+                .add_extension(x509.SubjectAlternativeName([x509.DNSName('localhost')]), critical=False)
+                .sign(key, hashes.SHA256()))
+        cert_file, key_file = self.root / 'cert.pem', self.root / 'tls.key'
+        cert_file.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+        key_file.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+        objects = {}
+        verified_paths = set()
+        settings = {'corrupt': False}
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_HEAD(self):
+                if self.path.startswith('/redirect/'):
+                    self.send_response(302); self.send_header('Location', 'https://elsewhere.example/'); self.end_headers(); return
+                self.send_response(200 if self.path in objects else 404); self.end_headers()
+            def do_PUT(self):
+                assert self.headers.get('If-None-Match') == '*'
+                assert self.headers.get('Authorization') == 'Basic dGVzdC11c2VyOnRlc3QtcGFzc3dvcmQ='
+                if self.path in objects:
+                    self.send_response(412); self.end_headers(); return
+                objects[self.path] = self.rfile.read(int(self.headers['Content-Length']))
+                self.send_response(201); self.end_headers()
+            def do_GET(self):
+                data = objects.get(self.path)
+                if data is not None and settings['corrupt']:
+                    data = bytes([data[0] ^ 1]) + data[1:]
+                if data is None:
+                    self.send_response(404); self.end_headers(); return
+                self.send_response(200); self.send_header('Content-Length', str(len(data))); self.end_headers(); self.wfile.write(data)
+                if not settings['corrupt']: verified_paths.add(self.path)
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); ctx.load_cert_chain(cert_file, key_file)
+        server.socket = ctx.wrap_socket(server.socket, server_side=True)
+        thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+        def factory(hostname, port, **kwargs):
+            return http.client.HTTPSConnection(hostname, port, timeout=kwargs['timeout'], context=ssl.create_default_context(cafile=str(cert_file)))
+        try:
+            url = f'https://localhost:{server.server_port}/secure%20folder'
+            b.upload_webdav(self.archive, url, creds, self.key, connection_factory=factory)
+            self.assertEqual(objects['/secure%20folder/backup.kvbak'], self.archive.read_bytes())
+            with self.assertRaises(RuntimeError): b.upload_webdav(self.archive, url, creds, self.key, connection_factory=factory)
+            with self.assertRaises(RuntimeError): b.upload_webdav(self.archive, f'https://localhost:{server.server_port}/redirect', creds, self.key, connection_factory=factory)
+            second = self.out / 'second.kvbak'; b.backup(self.data, second, self.key)
+            settings['corrupt'] = True
+            with self.assertRaises(RuntimeError): b.upload_webdav(second, url, creds, self.key, connection_factory=factory)
+            settings['corrupt'] = False
+            third = self.out / 'third.kvbak'; b.backup(self.data, third, self.key)
+            script = Path(__file__).resolve().parents[1] / 'tools/backup/kova_backup.py'
+            env = {**os.environ, 'SSL_CERT_FILE': str(cert_file)}
+            result = subprocess.run([sys.executable, str(script), 'upload-webdav', str(third), str(self.key), url, str(creds)], env=env, capture_output=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            self.assertEqual(objects['/secure%20folder/third.kvbak'], third.read_bytes())
+            process = subprocess.Popen([sys.executable, str(script), 'schedule', str(self.data), str(self.out), str(self.key), '--interval', '3600', '--webdav-url', url, '--webdav-credentials', str(creds)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            try:
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline and not any('/kova-' in path for path in verified_paths):
+                    if process.poll() is not None: self.fail('WebDAV scheduler exited unexpectedly')
+                    time.sleep(.05)
+                self.assertTrue(any('/kova-' in path for path in verified_paths), 'scheduled WebDAV read-back missing')
+            finally:
+                process.terminate(); process.communicate(timeout=5)
+            os.chmod(creds, 0o644)
+            with self.assertRaises(ValueError): b.upload_webdav(self.archive, url, creds, self.key, connection_factory=factory)
+        finally:
+            server.shutdown(); server.server_close(); thread.join(timeout=5)
+        for url in ('http://example.com/a', 'https://user:pass@example.com', 'https://example.com/a?key=secret',
+                    'https://example.com/a/../b', 'https://example.com/a/%2f/b', 'https://example.com/a/%5c/b'):
+            with self.assertRaises(ValueError): b.webdav_destination(url)
 
     def test_guardrails(self):
         with self.assertRaises(ValueError): b.backup(self.data, self.data / 'bad', self.key)

@@ -39,7 +39,7 @@ Công cụ thử nghiệm bên dưới chỉ sao lưu metadata Kova; NodeWarden 
 
 Công cụ tùy chọn `tools/backup/kova_backup.py` chụp SQLite bằng SQLite Backup API (bao gồm WAL), mã hóa AES-256-GCM và kiểm tra giải mã/tính toàn vẹn SQLite sau mỗi lần chạy lịch. Nó **chỉ** lưu `data.db` và `config.json`, tối đa 64 MiB database và 1 MiB config. Không sao lưu tệp Local, tệp cloud, NodeWarden, attachments, biến môi trường, backup key hay `ALIST_JWT_SECRET` đặt qua môi trường. Nếu server dùng biến đó, phải giữ đúng secret riêng biệt để khôi phục credential; không gửi hoặc commit secret. `verify` không thay thế kiểm thử khôi phục và đăng nhập.
 
-Công cụ chạy độc lập bằng Python 3.11+ có `sqlite3` và thư viện `cryptography`; **không có sẵn trong image Render**, không tự gửi backup tới đám mây, không chạy khi host ngủ và không giúp Render Free giữ dữ liệu. Chỉ dùng trên host có quyền đọc cùng database và nơi lưu bền vững riêng. Lưu bản mã hóa sang nơi khác và lưu key ở **nơi khác nữa**; mất key sẽ không giải mã được. Không bỏ key vào Git, Catbox hay cùng thư mục backup. Bảo vệ các thư mục khỏi người dùng khác; tool yêu cầu thư mục backup và thư mục cha khôi phục thuộc user đang chạy và mode 0700. Trong lúc kiểm tra/khôi phục, một bản SQLite **plaintext tạm** được ghi vào `TMPDIR` của máy chạy, sau đó xóa; đặt `TMPDIR` trên filesystem riêng tư/mã hóa và hiểu rằng xóa không bảo đảm xóa vật lý.
+Công cụ chạy độc lập bằng Python 3.11+ có `sqlite3` và thư viện `cryptography`; **không có sẵn trong image Render**, có thể gửi bản mã hóa tới WebDAV khi bạn cấu hình, không chạy khi host ngủ và không giúp Render Free giữ dữ liệu. Chỉ dùng trên host có quyền đọc cùng database và nơi lưu bền vững riêng. Lưu bản mã hóa sang nơi khác và lưu key ở **nơi khác nữa**; mất key sẽ không giải mã được. Không bỏ key vào Git, Catbox hay cùng thư mục backup. Bảo vệ các thư mục khỏi người dùng khác; tool yêu cầu thư mục backup và thư mục cha khôi phục thuộc user đang chạy và mode 0700. Trong lúc kiểm tra/khôi phục, một bản SQLite **plaintext tạm** được ghi vào `TMPDIR` của máy chạy, sau đó xóa; đặt `TMPDIR` trên filesystem riêng tư/mã hóa và hiểu rằng xóa không bảo đảm xóa vật lý.
 
 Ví dụ chạy từ clone có thay đổi mới, thay `/duong-dan-data` bằng đường dẫn thực trên host và dùng shell an toàn (không nhập mật khẩu vault):
 
@@ -64,3 +64,35 @@ Muốn chạy tự động mỗi ngày trên host còn hoạt động, chạy ti
 ```
 
 Lần đầu chạy ngay, sau đó theo khoảng giây (tối thiểu 3600); lỗi được báo log, không có cảnh báo bên ngoài, không tự xóa backup cũ. Giám sát dung lượng và log, lập chính sách retention thủ công sau khi xác minh bản mới. Nếu database cấu hình đường dẫn khác `data.db` trong thư mục data, hoặc config thay đổi khi chụp, tool từ chối. Đường dẫn database tương đối được tính từ thư mục làm việc của tool: chạy cùng working directory với server hoặc sửa đường dẫn theo hướng dẫn quản trị. Đây là bản thử nghiệm, chưa kiểm thử restore với dữ liệu người dùng hay dịch vụ thực.
+
+### Tự gửi bản mã hóa tới WebDAV của bạn
+
+Cần một thư mục WebDAV **đã tồn tại**, HTTPS với chứng chỉ hợp lệ và tài khoản Basic riêng có quyền HEAD, PUT, GET. Tool không tạo thư mục, không chuyển hướng, không hỗ trợ URL chứa user/password, query hoặc fragment, không tắt kiểm tra TLS. Chỉ cấu hình đích do bạn tin cậy; đây là CLI chạy trên host của bạn, không phải API công cộng và không phải SSRF sandbox. Không dùng tài khoản admin nếu tạo được tài khoản giới hạn đường dẫn. Tài khoản WebDAV bật TOTP của Kova cần mã mỗi request nên không dùng được với tool này.
+
+Tạo file credential cục bộ ngoài repository (không gửi username/password trong chat). Lệnh dưới hỏi trong terminal; mật khẩu không hiện khi nhập và file mới được tạo với mode 0600, không ghi đè:
+
+```sh
+.venv/bin/python - <<'PY'
+import getpass, json, os
+path = os.path.expanduser('~/kova-keys/webdav.json')
+user = input('WebDAV username: ')
+password = getpass.getpass('WebDAV password: ')
+fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+with os.fdopen(fd, 'w') as f:
+    json.dump({'username': user, 'password': password}, f)
+PY
+```
+
+Thay URL bên dưới bằng URL thư mục WebDAV **của bạn** (không gồm mật khẩu hay query), giữ nguyên tên file credential. Tạo backup mới với tên duy nhất, rồi thử tải bản mã hóa đó:
+
+```sh
+.venv/bin/python tools/backup/kova_backup.py upload-webdav "$HOME/kova-backups/first.kvbak" "$HOME/kova-keys/backup.key" 'https://webdav-cua-ban.example/thu-muc-backup' "$HOME/kova-keys/webdav.json"
+```
+
+Muốn chạy lịch với WebDAV, dùng lệnh `schedule` phía trên và thêm **trên cùng dòng**:
+
+```sh
+--webdav-url 'https://webdav-cua-ban.example/thu-muc-backup' --webdav-credentials "$HOME/kova-keys/webdav.json"
+```
+
+Mỗi lần chụp dùng tên ngẫu nhiên mới; tool xác thực bản mã hóa local, HEAD kiểm tra tên chưa tồn tại, PUT với `If-None-Match: *`, sau đó GET và so sánh SHA-256 byte-for-byte. Một số WebDAV có thể bỏ qua điều kiện PUT; HEAD không loại được race nên dùng thư mục riêng và không để nhiều client ghi cùng tên. Khi lỗi upload/verify, bản local vẫn còn; tool không xóa bản cũ hay tự tải lại bản remote. Để khôi phục, tải ciphertext về bằng client WebDAV an toàn, chạy `verify` và `restore` với key riêng. Luồng này đã thử TLS cục bộ và dữ liệu giả, **chưa thử với WebDAV của bạn**. Không cung cấp mật khẩu, credential file hay key cho tôi.
