@@ -13,7 +13,7 @@ the time of writing, not exhaustive verification against real providers.
 | --- | --- | --- |
 | GoogleDrive | Experimental single-account and owner-scoped read-only folder list/name filter, binary/range download and Workspace export; mocks only | OAuth consent and credential lifecycle, path mapping, writes, complete export formats, error and quota handling, permissions, real-provider tests |
 | OneDrive | Not implemented | Microsoft OAuth, Graph API, pagination, redirects and writes |
-| Dropbox | Disabled-by-default folder listing/download and owner-scoped small create-only upload; encrypted access/refresh credential records; mocks only | Interactive OAuth, large/resumable uploads, sharing, error handling, hardening and real-provider tests |
+| Dropbox | Disabled-by-default folder listing/download, small create-only upload and owner-scoped OAuth/credential records; mocks only | Large/resumable uploads, sharing, error handling, OAuth hardening and real-provider tests |
 | S3 | Not implemented as an S3 client | SigV4, endpoints, multipart, safe redirect/SSRF policy and provider tests. The R2 binding prototype is not S3 driver parity |
 | WebDAV | Not implemented | HTTP methods, XML handling, streaming and SSRF controls |
 | SFTP, FTP | Not implemented | Runtime/network protocol feasibility and secure authentication must be verified; do not assume native libcurl transfers directly |

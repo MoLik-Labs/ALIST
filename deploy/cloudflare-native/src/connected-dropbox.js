@@ -41,6 +41,22 @@ const now = () => Math.floor(Date.now()/1000);
 const json = (status, value) => new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'no-referrer'}});
 const fail = (status, message) => json(status,{error:message});
 
+// Guard connection insertion atomically against revocation and account disable.
+export async function createDropboxConnection(db, secret, user, credentials, sessionHash) {
+  const credentialText=encodeCredentials(credentials);
+  if (credentialText === null || typeof user !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(user) || !/^[a-f0-9]{64}$/.test(sessionHash || '')) return null;
+  const key=await vaultKey(secret), id=b64(crypto.getRandomValues(new Uint8Array(16)));
+  const nonce=crypto.getRandomValues(new Uint8Array(12));
+  const cipher=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv:nonce,additionalData:aad(id,user)},key,enc.encode(credentialText)));
+  const timestamp=now();
+  const result=await db.prepare(`INSERT INTO dropbox_connections (id,owner_id,nonce,ciphertext,created_at)
+    SELECT ?,u.id,?,?,? FROM users AS u WHERE u.id=? AND u.disabled=0
+    AND EXISTS (SELECT 1 FROM sessions s WHERE s.token_hash=? AND s.user_id=u.id AND s.revoked_at IS NULL AND s.expires_at>?)
+    AND (SELECT COUNT(*) FROM dropbox_connections WHERE owner_id=u.id)<50`)
+    .bind(id,b64(nonce),b64(cipher),timestamp,user,sessionHash,timestamp).run();
+  return result.meta?.changes === 1 ? id : null;
+}
+
 export async function connectedDropboxRequest(request, env) {
   if (env?.KOVA_EXPERIMENTAL_V2 !== 'enabled' || env?.KOVA_EXPERIMENTAL_DROPBOX_V2 !== 'enabled') return fail(404,'Not found');
   const url = new URL(request.url), connections = url.pathname === '/v2/dropbox/connections';
@@ -59,18 +75,9 @@ export async function connectedDropboxRequest(request, env) {
       if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get('content-type') || '')) return fail(415,'Expected JSON');
       let body;
       try { body = await readSmallJson(request); } catch { return fail(400,'Invalid request'); }
-      const credentialText=encodeCredentials(body);
-      if (credentialText === null) return fail(400,'Invalid request');
-      const key = await vaultKey(env.KOVA_CREDENTIAL_KEY), id = b64(crypto.getRandomValues(new Uint8Array(16)));
-      const nonce = crypto.getRandomValues(new Uint8Array(12));
-      const cipher = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv:nonce,additionalData:aad(id,user)},key,enc.encode(credentialText)));
-      const timestamp = now(), sessionHash = await hashSessionToken(session);
-      const result = await env.DB.prepare(`INSERT INTO dropbox_connections (id,owner_id,nonce,ciphertext,created_at)
-        SELECT ?,u.id,?,?,? FROM users AS u WHERE u.id=? AND u.disabled=0
-        AND EXISTS (SELECT 1 FROM sessions s WHERE s.token_hash=? AND s.user_id=u.id AND s.revoked_at IS NULL AND s.expires_at>?)
-        AND (SELECT COUNT(*) FROM dropbox_connections WHERE owner_id=u.id)<50`)
-        .bind(id,b64(nonce),b64(cipher),timestamp,user,sessionHash,timestamp).run();
-      return result.meta?.changes === 1 ? json(201,{id}) : fail(409,'Connection unavailable');
+      if (encodeCredentials(body) === null) return fail(400,'Invalid request');
+      const id=await createDropboxConnection(env.DB,env.KOVA_CREDENTIAL_KEY,user,body,await hashSessionToken(session));
+      return id ? json(201,{id}) : fail(409,'Connection unavailable');
     }
     if (connections && request.method === 'GET') {
       const result = await env.DB.prepare('SELECT id,created_at FROM dropbox_connections WHERE owner_id=? ORDER BY id LIMIT 50').bind(user).all();

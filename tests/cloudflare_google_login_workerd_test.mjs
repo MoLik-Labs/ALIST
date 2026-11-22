@@ -7,7 +7,7 @@ const privateKey=await crypto.subtle.exportKey('jwk',pair.privateKey);
 const key=Buffer.alloc(32,4).toString('base64url');
 const root = new URL('../deploy/cloudflare-native/src/',import.meta.url);
 const modules=[];
-for (const name of ['index.js','connected-drive.js','google-drive.js','dropbox.js','connected-dropbox.js','google-oauth.js','google-login.js','google-identity.js','credential-vault.js','sessions.js'])
+for (const name of ['index.js','connected-drive.js','google-drive.js','dropbox.js','connected-dropbox.js','dropbox-oauth.js','google-oauth.js','google-login.js','google-identity.js','credential-vault.js','sessions.js'])
   modules.push({type:'ESModule',path:`${process.cwd()}/app/${name}`,contents:await readFile(new URL(name,root),'utf8')});
 const harness=`import {handleRequest} from './app/index.js';
 import {createGoogleConnection} from './app/credential-vault.js';
@@ -15,6 +15,7 @@ const key = '${key}'; let nonce;
 const encode = x => btoa(JSON.stringify(x)).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');
 globalThis.fetch = async (url, options) => {
  if (String(url)==='https://api.dropboxapi.com/oauth2/token') {
+  if(options.body.get('grant_type')==='authorization_code') return Response.json({refresh_token:'refresh-token',access_token:'fresh-dropbox'});
   if(options.body.get('grant_type')!=='refresh_token' || options.body.get('refresh_token')!=='refresh-token') throw Error('invalid refresh');
   return Response.json({access_token:'fresh-dropbox'});
  }
@@ -50,7 +51,7 @@ globalThis.fetch = async (url, options) => {
  return Response.json({id_token:h+'.'+p+'.'+sig});
 };
 export default {async fetch(req,env){
- const config={DB:env.DB,KOVA_CREDENTIAL_KEY:key,KOVA_EXPERIMENTAL_V2:'enabled',KOVA_EXPERIMENTAL_LOGIN:'enabled',GOOGLE_CLIENT_ID:'client',GOOGLE_CLIENT_SECRET:'secret',KOVA_LOGIN_REDIRECT:'https://worker.test/v2/auth/google/callback',KOVA_EXPERIMENTAL_DROPBOX:'enabled',KOVA_EXPERIMENTAL_DROPBOX_V2:'enabled',KOVA_EXPERIMENTAL_DROPBOX_WRITES:'enabled',DROPBOX_ACCESS_TOKEN:'test-token',KOVA_NATIVE_TOKEN:'test-only-native-token-at-least-32-characters'};
+ const config={DB:env.DB,KOVA_CREDENTIAL_KEY:key,KOVA_EXPERIMENTAL_V2:'enabled',KOVA_EXPERIMENTAL_LOGIN:'enabled',GOOGLE_CLIENT_ID:'client',GOOGLE_CLIENT_SECRET:'secret',KOVA_LOGIN_REDIRECT:'https://worker.test/v2/auth/google/callback',KOVA_EXPERIMENTAL_DROPBOX:'enabled',KOVA_EXPERIMENTAL_DROPBOX_V2:'enabled',KOVA_EXPERIMENTAL_DROPBOX_WRITES:'enabled',KOVA_EXPERIMENTAL_DROPBOX_OAUTH:'enabled',DROPBOX_CLIENT_ID:'key',DROPBOX_CLIENT_SECRET:'secret',KOVA_DROPBOX_REDIRECT:'https://worker.test/v2/dropbox/oauth/callback',DROPBOX_ACCESS_TOKEN:'test-token',KOVA_NATIVE_TOKEN:'test-only-native-token-at-least-32-characters'};
  const dropHeaders={authorization:'Bearer '+config.KOVA_NATIVE_TOKEN};
  const dropList=await handleRequest(new Request('https://worker.test/v1/dropbox/files',{headers:dropHeaders}),config);
  const dropFile=await handleRequest(new Request('https://worker.test/v1/dropbox/file?path='+encodeURIComponent('/Ảnh'),{headers:dropHeaders}),config);
@@ -70,7 +71,12 @@ export default {async fetch(req,env){
  const refreshedConnection=await handleRequest(new Request('https://worker.test/v2/dropbox/connections',{method:'POST',headers:userHeaders,body:JSON.stringify({appKey:'key',appSecret:'secret',refreshToken:'refresh-token'})}),config);
  const refreshId=(await refreshedConnection.json()).id;
  const refreshList=await handleRequest(new Request('https://worker.test/v2/dropbox/files?connection='+refreshId,{headers:userHeaders}),config);
- const dropV2={created:createdDropbox.status,entries:connectedDrop.entries,upload:uploaded.status,uploadedData,removed:removedDropbox.status,refresh:refreshList.status};
+ const dropStart=await handleRequest(new Request('https://worker.test/v2/dropbox/oauth/start',{method:'POST',headers:userHeaders}),config);
+ const dropCookie=dropStart.headers.get('set-cookie').split(';')[0], dropAuth=new URL((await dropStart.json()).authorizationUrl);
+ const dropFinish=await handleRequest(new Request('https://worker.test/v2/dropbox/oauth/callback?code=test&state='+dropAuth.searchParams.get('state'),{headers:{cookie:dropCookie}}),config);
+ const dropIdOAuth=(await dropFinish.json()).connection;
+ const dropOauthList=await handleRequest(new Request('https://worker.test/v2/dropbox/files?connection='+dropIdOAuth,{headers:userHeaders}),config);
+ const dropV2={created:createdDropbox.status,entries:connectedDrop.entries,upload:uploaded.status,uploadedData,removed:removedDropbox.status,refresh:refreshList.status,oauth:dropFinish.status,oauthList:dropOauthList.status};
  const me=await handleRequest(new Request('https://worker.test/v2/me',{headers:{authorization:'Bearer '+data.token}}),config);
  const connection=await createGoogleConnection(env.DB,key,'alice',{clientId:'client',clientSecret:'secret',refreshToken:'synthetic-refresh'});
  const connections=await handleRequest(new Request('https://worker.test/v2/connections',{headers:{authorization:'Bearer '+data.token}}),config);
@@ -103,12 +109,12 @@ modules.unshift({type:'ESModule',path:`${process.cwd()}/entry.js`,contents:harne
 const mf=new Miniflare(convertV4MiniflareOptions({modules,compatibilityDate:'2026-11-16',d1Databases:['DB']}));
 try {
  const db=await mf.getD1Database('DB');
- for (const name of ['0001_access_foundation.sql','0002_sessions.sql','0004_connections.sql','0006_identity.sql','0007_dropbox_connections.sql']) {
+ for (const name of ['0001_access_foundation.sql','0002_sessions.sql','0004_connections.sql','0006_identity.sql','0007_dropbox_connections.sql','0008_dropbox_oauth_pending.sql']) {
   const sql=await readFile(new URL(`../deploy/cloudflare-native/migrations/${name}`,import.meta.url),'utf8');
   for (const statement of sql.replace(/^\s*--.*$/gm,'').split(';').map(s=>s.trim()).filter(Boolean)) await db.prepare(statement).run();
  }
  await db.batch([db.prepare("INSERT INTO users(id,username) VALUES('alice','alice')"),db.prepare("INSERT INTO external_identities VALUES('google','google-subject','alice')")]);
  const response=await mf.dispatchFetch('http://localhost/test'); assert.equal(response.status,200);
- assert.deepEqual(await response.json(),{dropbox:{listing:{entries:[{type:'file',name:'Ảnh',path:'/Ảnh',size:2}],nextCursor:null},status:200,body:'ok'},dropV2:{created:201,entries:[{type:'file',name:'Ảnh',path:'/Ảnh',size:2}],upload:201,uploadedData:{name:'new.txt',path:'/new.txt',size:3},removed:200,refresh:200},browser:{finish:303,location:'/',me:200,logout:200,after:401},start:200,finish:200,me:{id:'alice'},connections:200,connectionListed:true,drive:200,listing:{files:[{id:'f',name:'My file',mimeType:'text/plain'}],nextPageToken:null},rangeResult:{status:206,range:'bytes 2-4/6',body:'cde'},exportResult:{status:200,body:'pdf'},disconnect:200,disconnected:{ok:true,providerRevoked:false},driveAfter:404,logout:200,after:401,replay:400});
+ assert.deepEqual(await response.json(),{dropbox:{listing:{entries:[{type:'file',name:'Ảnh',path:'/Ảnh',size:2}],nextCursor:null},status:200,body:'ok'},dropV2:{created:201,entries:[{type:'file',name:'Ảnh',path:'/Ảnh',size:2}],upload:201,uploadedData:{name:'new.txt',path:'/new.txt',size:3},removed:200,refresh:200,oauth:201,oauthList:200},browser:{finish:303,location:'/',me:200,logout:200,after:401},start:200,finish:200,me:{id:'alice'},connections:200,connectionListed:true,drive:200,listing:{files:[{id:'f',name:'My file',mimeType:'text/plain'}],nextPageToken:null},rangeResult:{status:206,range:'bytes 2-4/6',body:'cde'},exportResult:{status:200,body:'pdf'},disconnect:200,disconnected:{ok:true,providerRevoked:false},driveAfter:404,logout:200,after:401,replay:400});
  console.log('Experimental Google login workerd and D1 emulator tests passed');
 } finally {await mf.dispose();}

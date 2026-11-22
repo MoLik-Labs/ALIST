@@ -132,7 +132,7 @@ with only `accessToken`, or the C++ driver's equivalent credential fields
 Existing access-token records remain compatible. Refresh credentials are sealed
 in D1 and exchanged at Dropbox's fixed OAuth endpoint when needed. This does not
 implement the OAuth consent flow: obtaining these credentials remains a manual
-test step. There is no access-token cache, so each operation incurs a refresh
+test step unless the separately gated OAuth flow below is configured. There is no access-token cache, so each operation incurs a refresh
 request and Dropbox's associated latency/quota. `GET` lists the authenticated owner's connections;
 `DELETE /v2/dropbox/connections?id=...` deletes the local record. The bearer
 session is required for each request. `GET /v2/dropbox/files?connection=...`
@@ -155,8 +155,25 @@ can occur **after Dropbox created the file**; check the folder before retrying.
 The write uses a shared folder's existing Dropbox permissions and does not
 implement Kova public/private sharing.
 
+The optional interactive Dropbox connection flow additionally requires
+`KOVA_EXPERIMENTAL_DROPBOX_OAUTH=enabled`, the D1 migration
+`0008_dropbox_oauth_pending.sql`, `DROPBOX_CLIENT_ID`, `DROPBOX_CLIENT_SECRET`,
+and `KOVA_DROPBOX_REDIRECT` set to the same-origin HTTPS URL ending in
+`/v2/dropbox/oauth/callback`, also registered with Dropbox. Start with
+`POST /v2/dropbox/oauth/start` using the owner's session. It requests read scopes
+and offline access with PKCE and a single-use state, bound to the initiating
+browser and live session. The callback stores encrypted refresh credentials.
+To request Dropbox write permission additionally, explicitly enable
+`KOVA_EXPERIMENTAL_DROPBOX_OAUTH_WRITE=enabled`; this is distinct from the
+server-side upload switch. A popup returns JSON on success; return to the UI and
+refresh. Starting a second flow in the same browser invalidates the first browser
+binding. The feature has mock and workerd/D1-emulator tests only, no real-provider
+validation, production rate limiting, grant revocation or secure provisioning UI.
+An exchanged grant can survive if local persistence fails; revoke at Dropbox.
+Never publish secrets or callback URLs containing codes.
+
 These endpoints use fixed Dropbox API hosts and never follow redirects. Dropbox
-access tokens expire; interactive OAuth, larger uploads, shares, rate limiting,
+access tokens expire; larger uploads, shares, rate limiting,
 UI upload and real-provider testing remain unimplemented. v1 is still a shared-token endpoint
 if separately enabled; v2 does not change its security model. Local tests use
 mock responses, not Dropbox. Revoke test credentials after use. Dropbox quotas
@@ -262,8 +279,11 @@ bearer routes remain separate and would bypass these owner checks if enabled.
 
 An opt-in `/v2/google-drive/oauth/start` and callback prototype requests the
 Google Drive read-only scope using PKCE, a random single-use state, an encrypted
-short-lived verifier and a live initiating session. It stores the refresh token
-in the experimental owner-scoped vault. OAuth requires both experimental flags
+short-lived verifier, initiating browser cookie and a live initiating session.
+Migration `0009_google_oauth_browser_binding.sql` is required and invalidates
+pending attempts created before migration. Starting a second Google connection
+flow in the same browser invalidates the first browser binding. It stores the
+refresh token in the experimental owner-scoped vault. OAuth requires both experimental flags
 and a configured fixed HTTPS callback URI; the separate experimental UI can start this flow but is not production-ready. The separate login prototype is disabled by default. The flow has mock and
 local D1/workerd tests only and has not been verified with Google or deployed
 Cloudflare resources. **Do not enable it for users or sensitive data.**
