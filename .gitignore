@@ -34,3 +34,7 @@ compile_commands.json
 !/deploy/cloudflare-worker/.dev.vars.example
 /deploy/cloudflare-worker/.env
 /deploy/cloudflare-worker/.env.*
+
+# VitePress generated docs
+/docs/guide/.vitepress/cache/
+/docs/guide/.vitepress/dist/

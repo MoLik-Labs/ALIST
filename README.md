@@ -18,7 +18,7 @@
 
 The browser UI is embedded in the native binary. Runtime assets are served locally; the application does not need a third-party CDN.
 
-The standalone documentation website is in [`docs/site`](docs/site/). Serve that directory as static files, for example with `python3 -m http.server 8080 --directory docs/site`. The experimental Go server provides liveness and an optional separate local API with opt-in create-only uploads, but is **not a production replacement**; see [migration status](docs/go-migration.md).
+The bilingual documentation website is built with [VitePress](https://github.com/vuejs/vitepress) (MIT) from [`docs/guide`](docs/guide/). Run `npm ci` and `npm run docs:dev`, or `npm run docs:build` for GitHub Pages. Set GitHub Pages source to **GitHub Actions** and run the documentation workflow. For a custom domain set `DOCS_BASE=/`; project sites default to `/<repository>/`. The previous static docs remain in [`docs/site`](docs/site/) until migration is complete. The experimental Go server provides liveness and an optional separate local API with opt-in create-only uploads, but is **not a production replacement**; see [migration status](docs/go-migration.md).
 
 ## Quick deployment
 
@@ -33,7 +33,7 @@ creates a paid persistent disk and generates an initial admin password; review
 the plan and costs before confirming and retrieve the password from Render
 service environment settings. These links target the upstream repository, not
 your fork; for a fork select your repository in the provider dashboard.
-A separate [Cloudflare Pages proxy](deploy/cloudflare-pages/README.md) also
+An isolated [Cloudflare-native R2 reader prototype](deploy/cloudflare-native/README.md) is not a complete backend and must not be used for production. A separate [Cloudflare Pages proxy](deploy/cloudflare-pages/README.md) also
 requires that origin. Deploying `web` as static files alone cannot provide the
 server or data. See the [platform deployment guide](docs/platform-deployment.md) for Railway,
 Fly.io, Heroku, persistence, backup, scaling and first-start instructions.

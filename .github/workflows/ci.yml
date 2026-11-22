@@ -40,13 +40,19 @@ jobs:
       - name: Test Cloudflare Pages proxy adapter
         run: npm run test:pages
 
+      - name: Test experimental Cloudflare-native reader
+        run: npm run test:cf-native
+
       - name: Check native platform deployment configuration
         run: |
           python3 tests/platform_config_smoke.py
           python3 tests/native_entrypoint_smoke.py
 
-      - name: Test documentation navigation
-        run: npm run test:docs
+      - name: Test documentation navigation and build bilingual docs
+        run: |
+          npm run test:docs
+          npm run docs:build
+          npm run test:docs-build
 
       - name: Test Go workspace UI
         run: npm run test:go-ui
@@ -94,6 +100,8 @@ jobs:
           npx wrangler deploy --dry-run
           cd ../cloudflare-pages
           ../cloudflare-worker/node_modules/.bin/wrangler pages functions build functions --outdir /tmp/kova-pages-ci --compatibility-date 2026-11-16
+          cd ../cloudflare-native
+          ../cloudflare-worker/node_modules/.bin/wrangler deploy src/index.js --name kova-native-preview --compatibility-date 2026-11-16 --dry-run
         working-directory: deploy/cloudflare-worker
 
       - name: Install native C++20 dependencies

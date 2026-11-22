@@ -10,9 +10,15 @@
     "test:docs": "node tests/docs_smoke.mjs",
     "test:go-ui": "node tests/go_webui_smoke.mjs",
     "test:skills": "node tests/skills_integrity.mjs",
-    "test:pages": "node tests/cloudflare_pages_test.mjs"
+    "test:pages": "node tests/cloudflare_pages_test.mjs",
+    "docs:dev": "vitepress dev docs/guide --host 127.0.0.1",
+    "docs:build": "vitepress build docs/guide",
+    "docs:preview": "python3 -m http.server 4173 --bind 0.0.0.0 --directory docs/guide/.vitepress/dist",
+    "test:cf-native": "node tests/cloudflare_native_test.mjs",
+    "test:docs-build": "node tests/docs_bilingual_smoke.mjs"
   },
   "devDependencies": {
-    "happy-dom": "21.0.4"
+    "happy-dom": "21.0.4",
+    "vitepress": "1.6.4"
   }
 }
