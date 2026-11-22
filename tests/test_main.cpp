@@ -1025,6 +1025,17 @@ void test_live_http_api_webdav_and_concurrency() {
     std::string alice_jwt = JsonValue::parse(al_res.body)->get("data").get("token").as_str();
     CHECK(!alice_jwt.empty());
 
+    // Monitoring relay is admin-only and rejects arbitrary origins before any outbound request.
+    auto uptime_user = raw_http_call(port,
+        "GET /api/admin/system/uptime?origin=https%3A%2F%2Fevil.test HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + alice_jwt + "\r\nConnection: close\r\n\r\n");
+    CHECK(JsonValue::parse(uptime_user.body)->get("code").as_i64() == 403);
+    for (auto bad : {"https://evil.test", "https://localhost", "http://a.b.workers.dev", "https://a.b.workers.dev/abc", "https://a.b.workers.dev@evil.test", "https://a.b.workers.dev.evil.test", "https://a.b.workers.dev:443"}) {
+        auto reply = raw_http_call(port,
+            "GET /api/admin/system/uptime?origin=" + url_encode(bad) + " HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + admin_jwt + "\r\nConnection: close\r\n\r\n");
+        auto parsed = JsonValue::parse(reply.body);
+        CHECK(parsed && parsed->get("code").as_i64() == 400);
+    }
+
     // Verify alice CANNOT access /api/admin/* (Privilege Escalation Blocked!)
     auto alice_admin = raw_http_call(port,
         "GET /api/admin/user/list HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + alice_jwt + "\r\nConnection: close\r\n\r\n");

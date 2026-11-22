@@ -51,3 +51,10 @@ compile_commands.json
 # Local upstream source checkouts, not vendored into this repository
 /.cache/upstream/
 /deploy/uptime-monitor/wrangler.local.toml
+
+# Local Python virtual environment
+/.venv/
+
+# Python interpreter artifacts
+__pycache__/
+*.pyc

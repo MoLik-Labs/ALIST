@@ -49,7 +49,7 @@
       current: 'Current', revoke: 'Revoke', logOut: 'Sign out', sessionExpired: 'Session expired. Please sign in again.',
       fileDetails: 'File details', path: 'Path', provider: 'Storage', type: 'Type', creator: 'Created by', views: 'Views', downloads: 'Downloads',
       expires: 'Expires', protected: 'Password protected', publicShare: 'Public share', expired: 'Expired',
-      pingCheck: 'Check server now', pingReady: 'Checks /ping from this browser only; this is not historical uptime or a storage test.', pingPending: 'Checking server…', pingOk: 'Server responded to /ping.', pingFailed: 'Server did not respond correctly to /ping.', telemetry: 'Live system telemetry', pause: 'Pause updates', resume: 'Resume updates', refreshNow: 'Refresh now',
+      monitorTitle: 'External monitor', monitorOrigin: 'Monitor URL (workers.dev)', monitorCheck: 'Connect monitor', monitorHint: 'Optional public monitor. Updates here every minute while this page is open; it is not a backup or SLA.', monitorInvalid: 'Enter an HTTPS workers.dev origin without a path.', monitorUnavailable: 'Monitor unavailable. Check its URL and deployment.', monitorUp: 'Responding', monitorDown: 'Not responding', monitorStale: 'Monitor data is stale', monitorUnknown: 'No samples yet', monitorSamples: '{ok} of {total} samples successful in the last 24 hours', pingCheck: 'Check server now', pingReady: 'Checks /ping from this browser only; this is not historical uptime or a storage test.', pingPending: 'Checking server…', pingOk: 'Server responded to /ping.', pingFailed: 'Server did not respond correctly to /ping.', telemetry: 'Live system telemetry', pause: 'Pause updates', resume: 'Resume updates', refreshNow: 'Refresh now',
       uptime: 'Uptime', memory: 'Memory', peakMemory: 'Peak memory', threads: 'Threads', cpuCores: 'CPU cores',
       activeConnections: 'Active connections', totalRequests: 'Total requests', sent: 'Bytes sent', received: 'Bytes received',
       mounted: 'Mounted storages', database: 'Database size', cache: 'VFS cache', cacheHits: 'Cache hits', cacheMisses: 'Cache misses',
@@ -130,7 +130,7 @@
       currentSession: 'Phiên hiện tại', userShares: 'Liên kết của tôi', userTasks: 'Tác vụ của tôi', noSessions: 'Không có phiên đang hoạt động.', noShares: 'Chưa có liên kết chia sẻ.',
       noTasks: 'Chưa có tác vụ.', current: 'Hiện tại', revoke: 'Thu hồi', logOut: 'Đăng xuất', sessionExpired: 'Phiên đã hết hạn. Vui lòng đăng nhập lại.',
       fileDetails: 'Thông tin tệp', path: 'Đường dẫn', provider: 'Kho lưu trữ', type: 'Loại', creator: 'Người tạo', views: 'Lượt xem', downloads: 'Lượt tải', expires: 'Hết hạn', protected: 'Có mật khẩu',
-      publicShare: 'Chia sẻ công khai', expired: 'Đã hết hạn', pingCheck: 'Kiểm tra máy chủ', pingReady: 'Chỉ kiểm tra /ping từ trình duyệt này; không phải lịch sử uptime hay kiểm tra kho lưu trữ.', pingPending: 'Đang kiểm tra máy chủ…', pingOk: 'Máy chủ đã trả lời /ping.', pingFailed: 'Máy chủ không trả lời /ping đúng cách.', telemetry: 'Theo dõi hệ thống trực tiếp', pause: 'Tạm dừng cập nhật', resume: 'Tiếp tục cập nhật', refreshNow: 'Làm mới',
+      publicShare: 'Chia sẻ công khai', expired: 'Đã hết hạn', monitorTitle: 'Giám sát bên ngoài', monitorOrigin: 'URL giám sát (workers.dev)', monitorCheck: 'Kết nối giám sát', monitorHint: 'Monitor công khai tùy chọn. Trang này cập nhật mỗi phút khi đang mở; không phải backup hay SLA.', monitorInvalid: 'Nhập origin HTTPS workers.dev không có đường dẫn.', monitorUnavailable: 'Không kết nối được monitor. Kiểm tra URL và deployment.', monitorUp: 'Đang phản hồi', monitorDown: 'Không phản hồi', monitorStale: 'Dữ liệu giám sát đã cũ', monitorUnknown: 'Chưa có mẫu', monitorSamples: '{ok} trên {total} mẫu thành công trong 24 giờ qua', pingCheck: 'Kiểm tra máy chủ', pingReady: 'Chỉ kiểm tra /ping từ trình duyệt này; không phải lịch sử uptime hay kiểm tra kho lưu trữ.', pingPending: 'Đang kiểm tra máy chủ…', pingOk: 'Máy chủ đã trả lời /ping.', pingFailed: 'Máy chủ không trả lời /ping đúng cách.', telemetry: 'Theo dõi hệ thống trực tiếp', pause: 'Tạm dừng cập nhật', resume: 'Tiếp tục cập nhật', refreshNow: 'Làm mới',
       uptime: 'Thời gian hoạt động', memory: 'Bộ nhớ', peakMemory: 'Bộ nhớ đỉnh', threads: 'Luồng', cpuCores: 'Lõi CPU', activeConnections: 'Kết nối hiện tại',
       totalRequests: 'Tổng yêu cầu', sent: 'Đã gửi', received: 'Đã nhận', mounted: 'Kho đã gắn', database: 'Dung lượng cơ sở dữ liệu', cache: 'Bộ nhớ đệm VFS', cacheHits: 'Lượt trúng bộ đệm',
       cacheMisses: 'Lượt trượt bộ đệm', indexed: 'Tệp đã lập chỉ mục', activeTasks: 'Tác vụ đang chạy', completedTasks: 'Tác vụ hoàn tất', telemetryUnavailable: 'Chưa có dữ liệu theo dõi.',
@@ -242,7 +242,7 @@
     listController: null, searchController: null, palette: { scope: 0, global: true, index: 0, timer: 0, results: [] },
     pathPasswords: {}, readmeRaw: false, modalReturnFocus: null, previewUrls: [], previewMode: 'view',
     contextPath: '', uploadQueue: [], uploadXhr: null, uploadCancel: false, uploadStarted: 0, uploadBytes: 0,
-    picker: null, adminTab: 'overview', adminTimer: 0, telemetryPaused: false, adminData: {},
+    picker: null, adminTab: 'overview', adminTimer: 0, monitorTimer: 0, monitorBusy: false, telemetryPaused: false, adminData: {},
     share: null, shareSubpath: '/', shareItems: [], shareController: null, shareToken: '', shareUnlocked: false,
     archive: null, storageForm: null, roleScopes: [], backendUnavailable: false, announcementDismissed: readStore('kova.notice.dismissed', '') === '1'
   };
@@ -1305,7 +1305,7 @@
     if (!state.user || Number(state.user.role) !== 2) { toast(t('noPermission'), 'err'); return; }
     setViewMode('admin'); selectAdminTab(tab); $('mainStage').focus({ preventScroll: true });
   }
-  function stopAdminTimer() { clearInterval(state.adminTimer); state.adminTimer = 0; }
+  function stopAdminTimer() { clearInterval(state.adminTimer); clearInterval(state.monitorTimer); state.adminTimer = 0; state.monitorTimer = 0; }
   function selectAdminTab(tab) {
     const allowed = ['overview', 'storages', 'users', 'roles', 'metas', 'shares', 'tasks', 'settings'];
     state.adminTab = allowed.includes(tab) ? tab : 'overview';
@@ -1350,7 +1350,12 @@
       ${statCard(t('cache'), stats.vfs_cache_entries, `${t('cacheHits')}: ${stats.vfs_cache_hits} · ${t('cacheMisses')}: ${stats.vfs_cache_misses}`)}
       ${statCard(t('indexed'), Number(stats.fts_indexed_files || 0).toLocaleString(), `${t('activeTasks')}: ${stats.tasks_undone} · ${t('completedTasks')}: ${stats.tasks_done}`)}
       ${statCard(APP, stats.version, stats.engine || '')}
-      </div><div class="panel-toolbar"><button type="button" class="btn" data-act="ping-now">${esc(t('pingCheck'))}</button><p class="field-help" id="pingStatus" role="status">${esc(t('pingReady'))}</p></div>`;
+      </div><div class="panel-toolbar"><button type="button" class="btn" data-act="ping-now">${esc(t('pingCheck'))}</button><p class="field-help" id="pingStatus" role="status">${esc(t('pingReady'))}</p></div>
+      <section aria-labelledby="monitorHeading"><h3 class="panel-heading" id="monitorHeading">${esc(t('monitorTitle'))}</h3><p class="field-help">${esc(t('monitorHint'))}</p>${field('monitor_origin', t('monitorOrigin'), readStore('kova.monitor.origin'), 'text', { id: 'monitorOrigin' })}<button type="button" class="btn" data-act="monitor-connect">${esc(t('monitorCheck'))}</button><p class="field-help" id="monitorStatus" role="status"></p></section>`;
+    if (readStore('kova.monitor.origin')) {
+      refreshExternalMonitor();
+      state.monitorTimer = setInterval(refreshExternalMonitor, 60000);
+    }
     if (!state.telemetryPaused) state.adminTimer = setInterval(async () => {
       if (state.currentView !== 'admin' || state.adminTab !== 'overview' || state.telemetryPaused) return;
       try {
@@ -1358,6 +1363,19 @@
         if (state.currentView === 'admin' && state.adminTab === 'overview') { state.adminData.stats = next; renderAdminOverviewFromCache(); }
       } catch {}
     }, 4000);
+  }
+  async function refreshExternalMonitor() {
+    const input = $('monitorOrigin'); const status = $('monitorStatus');
+    const origin = readStore('kova.monitor.origin');
+    if (!input || !status || !origin || state.monitorBusy) return;
+    state.monitorBusy = true;
+    try {
+      const info = await api(`/api/admin/system/uptime?origin=${encodeURIComponent(origin)}`);
+      if (!status.isConnected || input.value.trim() !== origin) return;
+      const labels = { up: 'monitorUp', down: 'monitorDown', stale: 'monitorStale', unknown: 'monitorUnknown' };
+      status.textContent = `${t(labels[info.state] || 'monitorUnknown')} · ${t('monitorSamples', { ok: info.successful, total: info.samples })}${info.checkedAt ? ` · ${formatDate(info.checkedAt)}` : ''}`;
+    } catch { if (status.isConnected && input.value.trim() === origin) status.textContent = t('monitorUnavailable'); }
+    finally { state.monitorBusy = false; }
   }
   function renderAdminOverviewFromCache() {
     const s = state.adminData.stats; if (!s) return;
@@ -1664,6 +1682,16 @@
       catch (error) { toast(error.message, 'err'); }
     } else if (action === 'copy-share-link') await copyShareLink(id);
     else if (action === 'admin-tab') selectAdminTab(element.dataset.tab);
+    else if (action === 'monitor-connect') {
+      const input = $('monitorOrigin'); const status = $('monitorStatus');
+      const value = input?.value.trim() || '';
+      if (!value) { removeStore('kova.monitor.origin'); clearInterval(state.monitorTimer); state.monitorTimer = 0; if (status) status.textContent = ''; return; }
+      if (!/^https:\/\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.workers\.dev$/.test(value)) { if (status) status.textContent = t('monitorInvalid'); return; }
+      writeStore('kova.monitor.origin', value);
+      clearInterval(state.monitorTimer);
+      state.monitorTimer = setInterval(refreshExternalMonitor, 60000);
+      await refreshExternalMonitor();
+    }
     else if (action === 'ping-now') {
       const status = $('pingStatus');
       if (!status) return;

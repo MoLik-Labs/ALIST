@@ -2,7 +2,7 @@
 
 ## Before enabling anything
 
-`/ping` only verifies the server returns `pong`, not login, database, drives or backups. Console → Overview has an on-demand browser check; it is not background monitoring and does not retain history.
+`/ping` only verifies the server returns `pong`, not login, database, drives or backups. Console → Overview has an on-demand browser check. After deploying the separate monitor, enter its `https://<worker>.<subdomain>.workers.dev` origin in the monitor section and connect; Kova displays its samples and refreshes each minute while the page is open. The origin is stored in that browser, not shared; clear it and connect to stop. The server fetches only the fixed status path over HTTPS and forwards no credentials. Custom monitor domains are not supported.
 
 The optional separate Worker below is inspired by UptimeFlare, not a full port: no notifications, multiple monitors or automatic upgrades. Its status page is **public**. Monitor only a service you own or are authorized to check. Five-minute checks may reduce idle spin-down but **do not guarantee availability**. Render may restart or suspend services for other reasons, and its 750 Free instance hours/month are shared across the workspace. Pinging does not make the filesystem durable. Read [Render Free](https://render.com/docs/free).
 
@@ -26,10 +26,41 @@ Set `name` to the new Worker, `id` to the new KV namespace ID, and `RENDER_ORIGI
 
 Verify account, Worker name, URL and binding. Dry-run does not create resources. Once certain this is a **new** Worker and separate KV, repeat without `--dry-run` to deploy for real. Do not alter `kova-inc`. Open the Worker URL shown. Cron propagation can take 15 minutes; wait an additional five-minute interval. Disable the cron/Worker when no longer needed.
 
-One monitor uses about 288 KV writes/day, against an account-wide Free quota. Public page visits also consume reads/requests; watch usage. KV is eventually consistent; concurrent or missed invocations may lose samples. Successful samples divided by samples is not an SLA or exact uptime; data older than 15 minutes is marked stale. The 75-second timeout allows for cold starts. Only around 24 hours of samples are kept; no alerts exist. Actual Cron, KV and Render integration has not been verified and neither availability nor free usage is guaranteed.
+One monitor uses about 288 KV writes/day, against an account-wide Free quota. Public page visits and an open console consume reads/requests (about one per minute per browser); watch usage. KV is eventually consistent; concurrent or missed invocations may lose samples. Successful samples divided by samples is not an SLA or exact uptime; data older than 15 minutes is marked stale. The 75-second timeout allows for cold starts. Only around 24 hours of samples are kept; no alerts exist. Actual Cron, KV and Render integration has not been verified and neither availability nor free usage is guaranteed.
 
 ## NodeWarden and backup
 
-NodeWarden has its own scheduled WebDAV/S3 backups. Kova supports WebDAV, but **real NodeWarden end-to-end compatibility is unverified**. A local synthetic test exercises MKCOL, PUT, HEAD, PROPFIND, GET and DELETE using dummy data. For further testing use a dedicated restricted Kova user with WebDAV rights only to a separate durable mount, connect over HTTPS at `/dav` using NodeWarden's settings, then test backup and restoration with dummy data in an isolated environment first. Kova requires an `X-OTP-Code` on every WebDAV Basic request for accounts with 2FA; the inspected NodeWarden WebDAV client sends Basic auth only, so those accounts cannot currently connect directly. A dedicated account without TOTP is a security trade-off: restrict its scope and credentials, and do not weaken your administrator account. Never share vault passwords, master keys or backup contents. Do not use Catbox for vault backups: its URLs are public.
+NodeWarden has its own scheduled WebDAV/S3 backups. Kova supports WebDAV, but **real NodeWarden end-to-end compatibility is unverified**. The real NodeWarden WebDAV uploader at commit `954bd05c10535e5828e43103caa821514c333f7c` has been tested locally with dummy uploads, listings, downloads, existence checks and deletion. The test rewrites a test hostname to loopback; it does not verify TLS, a deployed Worker or vault restoration. For further testing use a dedicated restricted Kova user with WebDAV rights only to a separate durable mount, connect over HTTPS at `/dav` using NodeWarden's settings, then test backup and restoration with dummy data in an isolated environment first. Kova requires an `X-OTP-Code` on every WebDAV Basic request for accounts with 2FA; the inspected NodeWarden WebDAV client sends Basic auth only, so those accounts cannot currently connect directly. A dedicated account without TOTP is a security trade-off: restrict its scope and credentials, and do not weaken your administrator account. Never share vault passwords, master keys or backup contents. Do not use Catbox for vault backups: its URLs are public.
 
-Kova **does not yet provide secure automated backup/restore** here; a NodeWarden backup does not back up Kova. Render Free loses local SQLite and mount data on spin-down/restart and is unsuitable as a backup destination. Use durable off-host storage, protect keys and encrypt backups, include metadata and attachments, and regularly test recovery. A raw copy of a running SQLite database can omit WAL state; see [security and recovery](./security). Do not automatically delete old backups until a new one has been verified.
+The experimental tool below backs up Kova metadata only; a NodeWarden backup does not back up Kova. Render Free loses local SQLite and mount data on spin-down/restart and is unsuitable as a backup destination. Use durable off-host storage, protect keys and encrypt backups, include metadata and attachments, and regularly test recovery. A raw copy of a running SQLite database can omit WAL state; see [security and recovery](./security). Do not automatically delete old backups until a new one has been verified.
+
+
+## Encrypted Kova metadata backup (experimental; durable host only)
+
+The optional `tools/backup/kova_backup.py` uses SQLite's Backup API (including WAL), encrypts with AES-256-GCM, and verifies decryption and SQLite integrity after each scheduled run. It includes **only** `data.db` and `config.json`, with limits of 64 MiB database and 1 MiB config. Local or cloud-mounted files, NodeWarden, attachments, environment variables, the backup key, and any environment-supplied `ALIST_JWT_SECRET` are excluded. If the server uses that override, protect and recover the exact secret separately or encrypted credentials cannot be recovered. `verify` is not a substitute for restoring and testing login.
+
+This standalone tool requires Python 3.11+ with `sqlite3` and `cryptography`. It is **not included in the Render image**, does not upload to cloud, and cannot run while its host sleeps. It cannot make Render Free durable. Use it only on a host that can read the live database and write to separate durable storage. Store encrypted backups off-host and keep a recovery copy of the key somewhere **separate**; losing the key makes the backups unreadable. Never commit a key or put it on Catbox or in the backup directory. Backup and restore-parent directories must be private, owned by the executing user and mode 0700. During verify/restore, a **plaintext SQLite scratch file** is written under `TMPDIR` and deleted; use a private encrypted temp filesystem and understand that deletion may not erase underlying blocks.
+
+From a clone with these changes, replace `/path-to-data` with the real host path (do not enter vault passwords):
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -r tools/backup/requirements.txt
+mkdir -p "$HOME/kova-keys" "$HOME/kova-backups" "$HOME/kova-temp"
+chmod 700 "$HOME/kova-keys" "$HOME/kova-backups" "$HOME/kova-temp"
+export TMPDIR="$HOME/kova-temp"
+.venv/bin/python tools/backup/kova_backup.py create-key "$HOME/kova-keys/backup.key"
+.venv/bin/python tools/backup/kova_backup.py create /path-to-data "$HOME/kova-backups/first.kvbak" "$HOME/kova-keys/backup.key"
+.venv/bin/python tools/backup/kova_backup.py verify "$HOME/kova-backups/first.kvbak" "$HOME/kova-keys/backup.key"
+.venv/bin/python tools/backup/kova_backup.py restore "$HOME/kova-backups/first.kvbak" "$HOME/kova-keys/backup.key" "$HOME/kova-temp/restore-test"
+```
+
+`create-key`, `create`, and `restore` refuse to overwrite; never replace your key. `restore-test` must not already exist. Restored configuration points DB/temp/log to the new directory, but mounts may still target real data: **isolate network and storage before starting the restored instance**. Test login, mounts, and recovery of files and external secrets. Copy ciphertext off-host and verify that a separately stored key can be recovered.
+
+To run daily while the host is running, run this foreground process under your host's systemd/supervisor (not installed or restarted automatically):
+
+```sh
+.venv/bin/python tools/backup/kova_backup.py schedule /path-to-data "$HOME/kova-backups" "$HOME/kova-keys/backup.key" --interval 86400
+```
+
+It runs immediately and then at the chosen interval in seconds (minimum 3600). Failures go to logs; there are no external alerts or automatic deletion. Monitor free space and logs; choose retention manually only after validating a newer backup. A custom DB path outside the data directory or a config changed during snapshot is rejected. Relative DB paths are interpreted against the tool's working directory: run it from the same working directory as the server. This is experimental and has not been tested with real user data or cloud services.

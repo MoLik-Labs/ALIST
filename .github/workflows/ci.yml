@@ -81,6 +81,12 @@ jobs:
       - name: Test isolated uptime monitor
         run: node tests/uptime_monitor_test.mjs
 
+      - name: Test encrypted metadata backup and recovery
+        run: |
+          python3 -m venv "$RUNNER_TEMP/kova-backup-venv"
+          "$RUNNER_TEMP/kova-backup-venv/bin/pip" install -r tools/backup/requirements.txt
+          "$RUNNER_TEMP/kova-backup-venv/bin/python" tests/backup_test.py
+
       - name: Check native platform deployment configuration
         run: |
           python3 tests/platform_config_smoke.py
@@ -167,6 +173,7 @@ jobs:
             make -j2 release &&
             ls -lh ./alist &&
             ./alist version &&
+            "$RUNNER_TEMP/kova-backup-venv/bin/python" tests/backup_native_integration.py &&
             make -j2 test &&
             make -j2 go-compat-test &&
             make -j2 go-db-compat-test
@@ -180,6 +187,14 @@ jobs:
             done < <(tail -n 9 /tmp/kova-native-ci.log)
           fi
           exit "$status"
+
+      - name: Test pinned NodeWarden WebDAV uploader against local Kova
+        run: |
+          mkdir -p /tmp/kova-nodewarden-source
+          curl -fsSL https://codeload.github.com/shuaiplus/NodeWarden/tar.gz/954bd05c10535e5828e43103caa821514c333f7c -o /tmp/kova-nodewarden.tar.gz
+          tar -xzf /tmp/kova-nodewarden.tar.gz -C /tmp/kova-nodewarden-source --strip-components=1
+          deploy/cloudflare-worker/node_modules/.bin/esbuild /tmp/kova-nodewarden-source/src/services/backup-uploader.ts --bundle --platform=node --format=esm --outfile=/tmp/kova-nodewarden-uploader.mjs
+          NODEWARDEN_UPLOADER=/tmp/kova-nodewarden-uploader.mjs node tests/nodewarden_webdav_integration.mjs
 
       - name: Run AddressSanitizer + LeakSanitizer + UBSan suite
         run: make -j2 asan

@@ -82,6 +82,7 @@ function createHarness({ path = '/', role = 2, items = [], backendDown = false }
     }
     if (pathName === '/api/fs/search') return response({ content: [], total: 0 });
     if (pathName === '/api/admin/system/stats') return response(adminStats);
+    if (pathName === '/api/admin/system/uptime') return response({ state: 'up', successful: 23, samples: 25, checkedAt: Date.now() });
     if (pathName === '/api/admin/storage/list') return response({ content: [{ id: 1, mount_path: '/data', driver: 'Local', status: 'work', remark: 'primary' }], total: 1 });
     if (pathName === '/api/admin/driver/list') return response(drivers);
     if (pathName === '/api/admin/storage/get') return response({ id: 1, mount_path: '/data', driver: 'Local', addition: '{"root_folder_path":"/tmp"}', order: 0, cache_expiration: 30, remark: 'primary', order_direction: 'ASC' });
@@ -180,6 +181,14 @@ async function testExplorerAndAdmin() {
   await eventually(() => document.querySelector('[data-act="ping-now"]'), 'Liveness action did not render');
   document.querySelector('[data-act="ping-now"]').click();
   await eventually(() => document.getElementById('pingStatus')?.textContent.includes('responded'), 'Liveness check did not show result');
+  const monitor = document.getElementById('monitorOrigin');
+  monitor.value = 'http://evil.test';
+  document.querySelector('[data-act="monitor-connect"]').click();
+  await eventually(() => document.getElementById('monitorStatus')?.textContent.includes('workers.dev'), 'Invalid monitor URL should be rejected');
+  monitor.value = 'https://my-monitor.account.workers.dev';
+  document.querySelector('[data-act="monitor-connect"]').click();
+  await eventually(() => document.getElementById('monitorStatus')?.textContent.includes('23 of 25'), 'External monitor summary did not render');
+  assert.ok(calls.some(c => c.path === '/api/admin/system/uptime' && c.query.get('origin') === monitor.value));
   for (const tab of ['overview', 'storages', 'users', 'roles', 'metas', 'shares', 'tasks', 'settings']) {
     document.querySelector(`[data-tab="${tab}"]`).click();
     await eventually(() => document.querySelector(`[data-tab="${tab}"]`).getAttribute('aria-selected') === 'true', `Admin tab ${tab} did not activate`);
