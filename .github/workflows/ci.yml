@@ -77,18 +77,30 @@ jobs:
 
       - name: Build hardened LTO release binary & run test suite
         run: |
-          make -j"$(nproc)" release
-          ls -lh ./alist
-          ./alist version
-          make -j"$(nproc)" test
-          make -j"$(nproc)" go-compat-test
-          make -j"$(nproc)" go-db-compat-test
+          set +e
+          {
+            make -j2 release &&
+            ls -lh ./alist &&
+            ./alist version &&
+            make -j2 test &&
+            make -j2 go-compat-test &&
+            make -j2 go-db-compat-test
+          } > /tmp/kova-native-ci.log 2>&1
+          status=$?
+          tail -n 80 /tmp/kova-native-ci.log
+          if [ "$status" -ne 0 ]; then
+            while IFS= read -r line; do
+              line=${line//'%'/'%25'}; line=${line//$'\r'/'%0D'}; line=${line//$'\n'/'%0A'}
+              printf '::error::%s\n' "$line"
+            done < <(tail -n 40 /tmp/kova-native-ci.log)
+          fi
+          exit "$status"
 
       - name: Run AddressSanitizer + LeakSanitizer + UBSan suite
-        run: make -j"$(nproc)" asan
+        run: make -j2 asan
 
       - name: Run ThreadSanitizer concurrency suite
-        run: make -j"$(nproc)" tsan
+        run: make -j2 tsan
 
       - name: Run performance & memory benchmarks
-        run: make -j"$(nproc)" bench
+        run: make -j2 bench
