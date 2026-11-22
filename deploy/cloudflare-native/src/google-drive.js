@@ -3,6 +3,15 @@
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const DRIVE_URL = 'https://www.googleapis.com/drive/v3/files';
 const MAX_JSON_BYTES = 1024 * 1024;
+// Fixed export types prevent arbitrary upstream content negotiation.
+const EXPORT_FORMATS = Object.freeze({
+  pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  txt: 'text/plain',
+  csv: 'text/csv',
+});
 const error = (status, message) => json(status, { error: message });
 const json = (status, data) => new Response(JSON.stringify(data), { status, headers: {
   'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
@@ -62,7 +71,10 @@ function validPartial(range, value, length) {
 export async function googleDriveRequest(url, env, requestHeaders = new Headers()) {
   const list = url.pathname === '/v1/google-drive/files';
   const download = url.pathname === '/v1/google-drive/file';
-  if (!list && !download) return error(404, 'Not found');
+  const exporting = url.pathname === '/v1/google-drive/export';
+  if (!list && !download && !exporting) return error(404, 'Not found');
+  const formats = url.searchParams.getAll('format');
+  if (exporting && (formats.length !== 1 || !Object.hasOwn(EXPORT_FORMATS, formats[0]) || requestHeaders.has('range'))) return error(400, 'Invalid export request');
   const idName = list ? 'parent' : 'id';
   const id = url.searchParams.get(idName) || (list ? 'root' : '');
   const cursor = url.searchParams.get('cursor') || '';
@@ -84,7 +96,7 @@ export async function googleDriveRequest(url, env, requestHeaders = new Headers(
     if (!tokenResponse.ok) return error(502, 'Google authorization failed');
     const token = (await readJson(tokenResponse)).access_token;
     if (!validSecret(token) || /\s/.test(token)) return error(502, 'Google authorization failed');
-    const target = new URL(list ? DRIVE_URL : `${DRIVE_URL}/${encodeURIComponent(id)}`);
+    const target = new URL(list ? DRIVE_URL : `${DRIVE_URL}/${encodeURIComponent(id)}${exporting ? '/export' : ''}`);
     if (list) {
       let query = `'${id}' in parents and trashed = false`;
       if (name !== null) query += ` and name contains '${name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
@@ -94,6 +106,8 @@ export async function googleDriveRequest(url, env, requestHeaders = new Headers(
       target.searchParams.set('supportsAllDrives', 'true');
       target.searchParams.set('includeItemsFromAllDrives', 'true');
       if (cursor) target.searchParams.set('pageToken', cursor);
+    } else if (exporting) {
+      target.searchParams.set('mimeType', EXPORT_FORMATS[formats[0]]);
     } else {
       target.searchParams.set('alt', 'media');
       target.searchParams.set('supportsAllDrives', 'true');
@@ -104,7 +118,7 @@ export async function googleDriveRequest(url, env, requestHeaders = new Headers(
     // body, truncating downloads after 30 seconds. Limit time to headers for
     // downloads instead; retain the full deadline for bounded JSON listings.
     let upstream;
-    if (download) {
+    if (download || exporting) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 30000);
       try {
@@ -133,7 +147,8 @@ export async function googleDriveRequest(url, env, requestHeaders = new Headers(
     }
     // Do not forward arbitrary upstream headers or redirect locations.
     const safeHeaders = { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment',
-      'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff', 'accept-ranges': 'bytes' };
+      'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' };
+    if (download) safeHeaders['accept-ranges'] = 'bytes';
     const contentLength = upstream.headers.get('content-length');
     if (contentLength && /^\d{1,19}$/.test(contentLength)) safeHeaders['content-length'] = contentLength;
     if (partial) safeHeaders['content-range'] = upstream.headers.get('content-range');

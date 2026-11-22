@@ -11,7 +11,7 @@ the time of writing, not exhaustive verification against real providers.
 
 | Native driver | Independent Worker status | Important migration work |
 | --- | --- | --- |
-| GoogleDrive | Experimental single-account and owner-scoped read-only folder list/name filter and binary/range download; mocks only | OAuth consent and credential lifecycle, path mapping, writes, Workspace export, error and quota handling, permissions, real-provider tests |
+| GoogleDrive | Experimental single-account and owner-scoped read-only folder list/name filter, binary/range download and Workspace export; mocks only | OAuth consent and credential lifecycle, path mapping, writes, complete export formats, error and quota handling, permissions, real-provider tests |
 | OneDrive | Not implemented | Microsoft OAuth, Graph API, pagination, redirects and writes |
 | Dropbox | Not implemented | OAuth, API cursor pagination, download and write flows |
 | S3 | Not implemented as an S3 client | SigV4, endpoints, multipart, safe redirect/SSRF policy and provider tests. The R2 binding prototype is not S3 driver parity |

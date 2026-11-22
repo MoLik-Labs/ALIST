@@ -14,7 +14,7 @@ const sessionHeader = /^Bearer ([A-Za-z0-9_-]{43})$/;
 export async function connectedDriveRequest(request, env) {
   if (env?.KOVA_EXPERIMENTAL_V2 !== 'enabled') return fail(404, 'Not found');
   const url = new URL(request.url);
-  const drive = url.pathname === '/v2/google-drive/files' || url.pathname === '/v2/google-drive/file';
+  const drive = url.pathname === '/v2/google-drive/files' || url.pathname === '/v2/google-drive/file' || url.pathname === '/v2/google-drive/export';
   const me = url.pathname === '/v2/me';
   const logout = url.pathname === '/v2/logout';
   const connections = url.pathname === '/v2/connections';

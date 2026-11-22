@@ -30,6 +30,7 @@ globalThis.fetch = async (url, options) => {
   requests.push({ url: String(url), options });
   if (String(url) === 'https://oauth2.googleapis.com/token') return Response.json({ access_token: 'test-access' });
   if (mode === 'range') return new Response('llo', { status:206, headers:{ 'content-range':'bytes 2-4/5', 'content-length':'3' } });
+  if (mode === 'export') return new Response('pdf');
   return Response.json({ files: [{ id: 'doc', name: 'Document', mimeType: 'text/plain' }] });
 };
 try {
@@ -84,6 +85,13 @@ try {
   assert.equal(response.headers.get('content-range'), 'bytes 2-4/5');
   assert.equal(await response.text(), 'llo');
   assert.equal(requests.at(-1).options.headers.range, 'bytes=2-4');
+  mode = 'export';
+  const exportRequest = who => new Request(`https://worker.test/v2/google-drive/export?connection=${connection}&id=doc&format=pdf`, {headers:{authorization:`Bearer ${who}`}});
+  assert.equal((await handleRequest(exportRequest(bob), env)).status, 404);
+  response = await handleRequest(exportRequest(alice), env);
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), 'pdf');
+  assert.equal(new URL(requests.at(-1).url).pathname, '/drive/v3/files/doc/export');
   const disconnect = (who, id) => new Request(`https://worker.test/v2/connections?id=${id}`, {method:'DELETE',headers:{authorization:`Bearer ${who}`}});
   assert.equal((await handleRequest(disconnect(bob, connection), env)).status, 404);
   assert.equal((await handleRequest(disconnect(alice, 'bad'), env)).status, 400);
@@ -106,10 +114,10 @@ try {
   assert.equal((await handleRequest(request(alice, connection, '/v2/me'), env)).status, 200, 'logout must not revoke another user');
   await revokeSession(db, alice);
   assert.equal((await handleRequest(request(alice), env)).status, 401);
-  assert.equal(requests.length, 6);
+  assert.equal(requests.length, 8);
   const alice2 = await issueSession(db, 'alice', Math.floor(Date.now()/1000)+600);
   sqlite.exec("UPDATE users SET disabled=1 WHERE id='alice'");
   assert.equal((await handleRequest(request(alice2), env)).status, 401);
-  assert.equal(requests.length, 6);
+  assert.equal(requests.length, 8);
   console.log('Experimental connected-drive session isolation tests passed');
 } finally { globalThis.fetch = originalFetch; sqlite.close(); }

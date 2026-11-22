@@ -62,8 +62,14 @@ owner-scoped v2 listing accepts the same filter. Additionally,
 `GET /v1/google-drive/file?id=...` streams a binary file. These routes use the
 same bearer token as the R2 API and do not require the R2 binding. Anyone with
 that token can access **all files authorized to the connected Google account**,
-not just one folder. Native Google Docs, Sheets and Slides require export and
-are not supported. Upload, recursive/full-text search, multipart ranges, shortcuts, OAuth consent UI,
+not just one folder. Native Google Workspace documents can be exported with
+`GET /v1/google-drive/export?id=...&format=pdf` (also available under `/v2/`
+with the owner's `connection` parameter). Allowed formats are `pdf`, `docx`,
+`xlsx`, `pptx`, `txt` and `csv`; Google determines which formats apply to each
+file. CSV exports only the first sheet. Exports do not support ranges, and
+[Google limits `files.export` output to 10 MB](https://developers.google.com/drive/api/reference/rest/v3/files/export).
+Exports are served as attachments, and provider errors are not returned verbatim.
+Upload, recursive/full-text search, multipart ranges, shortcuts, OAuth consent UI,
 per-user credentials, permissions, credential revocation, rate limiting and
 multi-drive management are not implemented. There is no Kova UI integration.
 
