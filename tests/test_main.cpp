@@ -68,7 +68,8 @@ std::string build_test_zip(std::string_view entry_name, std::string_view payload
 
     z_stream zs{};
     CHECK(alist_deflateInit2(&zs, 6, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY) == Z_OK);
-    zs.next_in = reinterpret_cast<const Bytef*>(payload.data());
+    // zlib reads the input; some versions expose a non-const next_in.
+    zs.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(payload.data()));
     zs.avail_in = static_cast<uInt>(payload.size());
     std::string comp(payload.size() + 64, '\0');
     zs.next_out = reinterpret_cast<Bytef*>(comp.data());
