@@ -79,7 +79,7 @@
       resetToken: 'Reset system token', buildIndex: 'Build FTS5 index', clearIndex: 'Clear search index', indexProgress: 'Index progress',
       tokenReset: 'System token reset. Copy it now; it will not be shown again.', copyToken: 'Copy token', indexedCount: '{n} indexed files',
       settingsDesc: 'Configure public workspace behavior, session limits, download links, and full-text indexing.',
-      ok: 'OK', error: 'Error', success: 'Success', warning: 'Warning', operationFailed: 'The operation could not be completed.', backendUnavailable: 'Kova server is unavailable. Deploy a persistent origin and configure the Cloudflare proxy; static files alone cannot run the workspace.',
+      ok: 'OK', error: 'Error', success: 'Success', warning: 'Warning', operationFailed: 'The operation could not be completed.', backendUnavailable: 'Kova server is unavailable. This static page cannot connect to files or sign in until a compatible backend is running.',
       viewShortcuts: 'Show keyboard shortcuts', shortcutAction: 'Action', shortcutKey: 'Shortcut',
       shortcutSearch: 'Search and commands', shortcutFilter: 'Filter this folder', shortcutMove: 'Move between files', shortcutOpen: 'Open or preview',
       shortcutParent: 'Go to parent folder', shortcutSelect: 'Select focused item', shortcutRename: 'Rename selected item', shortcutDelete: 'Delete selected items', shortcutHelp: 'Show this help',
@@ -153,7 +153,7 @@
       maxDevices: 'Số thiết bị tối đa mỗi người dùng', sessionTtl: 'Thời hạn phiên (giây)', forwardParams: 'Chuyển tiếp tham số liên kết trực tiếp', saveSettings: 'Lưu cài đặt', settingsSaved: 'Đã lưu cài đặt.',
       resetToken: 'Đặt lại mã hệ thống', buildIndex: 'Tạo chỉ mục FTS5', clearIndex: 'Xóa chỉ mục tìm kiếm', indexProgress: 'Tiến độ chỉ mục', tokenReset: 'Đã đặt lại mã hệ thống. Hãy sao chép ngay, mã sẽ không hiển thị lại.',
       copyToken: 'Sao chép mã', indexedCount: 'Đã lập chỉ mục {n} tệp', settingsDesc: 'Cấu hình hành vi công khai, giới hạn phiên, liên kết tải và lập chỉ mục toàn văn.',
-      ok: 'Đồng ý', error: 'Lỗi', success: 'Thành công', warning: 'Cảnh báo', operationFailed: 'Không thể hoàn tất thao tác.', backendUnavailable: 'Không kết nối được máy chủ Kova. Hãy triển khai server có dữ liệu bền vững và cấu hình proxy Cloudflare; chỉ có giao diện tĩnh là không đủ.', viewShortcuts: 'Xem phím tắt', shortcutAction: 'Thao tác', shortcutKey: 'Phím tắt',
+      ok: 'Đồng ý', error: 'Lỗi', success: 'Thành công', warning: 'Cảnh báo', operationFailed: 'Không thể hoàn tất thao tác.', backendUnavailable: 'Không kết nối được máy chủ Kova. Trang tĩnh chưa thể đăng nhập hoặc truy cập tệp cho đến khi backend tương thích hoạt động.', viewShortcuts: 'Xem phím tắt', shortcutAction: 'Thao tác', shortcutKey: 'Phím tắt',
       shortcutSearch: 'Tìm kiếm và lệnh', shortcutFilter: 'Lọc thư mục', shortcutMove: 'Di chuyển giữa các tệp', shortcutOpen: 'Mở hoặc xem trước', shortcutParent: 'Đến thư mục cha',
       shortcutSelect: 'Chọn mục đang focus', shortcutRename: 'Đổi tên mục đã chọn', shortcutDelete: 'Xóa mục đã chọn', shortcutHelp: 'Hiển thị trợ giúp', notFound: 'Không tìm thấy mục được yêu cầu.', item: 'Mục', unknown: 'Không rõ', never: 'Không bao giờ', bytes: 'byte',
       choose: 'Chọn', clear: 'Xóa', action: 'Thao tác', allFiles: 'Tất cả tệp', filesSelected: 'Tệp đã chọn', folderSelected: 'Thư mục đã chọn', sortAscending: 'Tăng dần', sortDescending: 'Giảm dần', noResults: 'Không có kết quả. Hãy thử truy vấn khác.',
@@ -244,7 +244,7 @@
     contextPath: '', uploadQueue: [], uploadXhr: null, uploadCancel: false, uploadStarted: 0, uploadBytes: 0,
     picker: null, adminTab: 'overview', adminTimer: 0, telemetryPaused: false, adminData: {},
     share: null, shareSubpath: '/', shareItems: [], shareController: null, shareToken: '', shareUnlocked: false,
-    archive: null, storageForm: null, roleScopes: [], announcementDismissed: readStore('kova.notice.dismissed', '') === '1'
+    archive: null, storageForm: null, roleScopes: [], backendUnavailable: false, announcementDismissed: readStore('kova.notice.dismissed', '') === '1'
   };
 
   class ApiError extends Error {
@@ -343,6 +343,7 @@
     $('batchDock').setAttribute('aria-label', t('selectedActions'));
     $('uploadDock').setAttribute('aria-label', t('uploadProgress'));
     $('announcementBar').setAttribute('aria-label', t('notice'));
+    if (state.backendUnavailable) $('announcementText').textContent = t('backendUnavailable');
     $('filterInput').setAttribute('placeholder', t('filterPlaceholder'));
     $('filterInput').setAttribute('aria-label', t('filter'));
     $('paletteInput').setAttribute('placeholder', t('searchPlaceholder'));
@@ -1044,7 +1045,9 @@
       document.title = `${$('siteTitle').textContent} · Kova`;
       if (state.settings.announcement) { $('announcementText').textContent = state.settings.announcement; $('announcementBar').hidden = state.announcementDismissed; }
     } catch {
+      state.backendUnavailable = true;
       $('announcementText').textContent = t('backendUnavailable');
+      document.querySelector('[data-act="dismiss-announcement"]').hidden = true;
       $('announcementBar').hidden = false;
       $('btnAuth').disabled = true;
       $('btnTopAdmin').hidden = true;
@@ -1589,7 +1592,7 @@
       $('paletteScopes').querySelectorAll('.scope-chip').forEach(chip => chip.classList.toggle('is-active', chip === element));
       schedulePaletteSearch();
     } else if (action === 'palette-result') await choosePaletteResult(Number(element.dataset.index));
-    else if (action === 'dismiss-announcement') { $('announcementBar').hidden = true; state.announcementDismissed = true; writeStore('kova.notice.dismissed', '1'); }
+    else if (action === 'dismiss-announcement' && !state.backendUnavailable) { $('announcementBar').hidden = true; state.announcementDismissed = true; writeStore('kova.notice.dismissed', '1'); }
     else if (action === 'set-view') setView(element.dataset.view);
     else if (action === 'refresh-dir') await loadDir(state.path, true);
     else if (action === 'load-more') { state.renderLimit = Math.min(state.filtered.length, state.renderLimit + 160); renderExplorer(); }

@@ -250,6 +250,9 @@ assert.ok(!rawIndex.includes('__INLINE_'));
   await eventually(() => !window.document.getElementById('announcementBar').hidden, 'Missing backend warning');
   assert.match(window.document.getElementById('announcementText').textContent, /server is unavailable/i);
   assert.equal(window.document.getElementById('btnAuth').disabled, true);
+  assert.equal(window.document.querySelector('[data-act="dismiss-announcement"]').hidden, true);
+  window.document.getElementById('btnLang').click();
+  assert.match(window.document.getElementById('announcementText').textContent, /Không kết nối được máy chủ Kova/);
   window.close();
 }
 
