@@ -10,5 +10,12 @@
   },
   "devDependencies": {
     "wrangler": "4.165.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "KOVA_ORIGIN": {
+        "description": "HTTPS origin of your separately deployed Kova server; no path, query, or credentials. The Worker does not host Kova itself."
+      }
+    }
   }
 }

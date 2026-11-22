@@ -20,6 +20,19 @@ The browser UI is embedded in the native binary. Runtime assets are served local
 
 The standalone documentation website is in [`docs/site`](docs/site/). Serve that directory as static files, for example with `python3 -m http.server 8080 --directory docs/site`. The experimental Go server provides liveness and an optional separate local API with opt-in create-only uploads, but is **not a production replacement**; see [migration status](docs/go-migration.md).
 
+## Quick deployment
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2FMoLik-Labs%2FALIST)
+[![Deploy Cloudflare edge proxy](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FMoLik-Labs%2FALIST%2Ftree%2FBETA%2Fdeploy%2Fcloudflare-worker)
+
+The repository is currently **private**: Cloudflare's button requires a public
+repository, and Render users need access to the repository. Buttons use `BETA`,
+so changes in an unmerged branch are not included. Cloudflare deploys only the
+edge proxy; it needs a separate HTTPS origin and `KOVA_ORIGIN` secret. Render
+creates a paid persistent disk; review the plan and costs before confirming.
+See the [platform deployment guide](docs/platform-deployment.md) for Railway,
+Fly.io, Heroku, persistence, backup, scaling and first-start instructions.
+
 ## Build and run
 
 ### Requirements
