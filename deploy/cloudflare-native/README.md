@@ -99,3 +99,24 @@ management must revoke relevant links transactionally when removing grants if
 permanent revocation is required. A deployment operator can access plaintext by
 changing Worker code or bindings. Do not use this as a security
 boundary until integrated and reviewed end to end.
+
+## Session foundation (not login)
+
+`migrations/0002_sessions.sql` and `src/sessions.js` add isolated session
+primitives: 256-bit random tokens, token hashes in D1, fixed expiry (at most
+24 hours), account-disabled checks and revocation. Tests use SQLite and the
+local workerd/D1 emulator; they do not verify production D1. **No HTTP route
+uses them.** `issueSession` must only be called after a trusted authentication
+flow verifies identity. There is no password authentication, login UI, reset,
+2FA, CSRF policy, session cookie handling, brute-force protection, multi-user
+provider authorization or operational key recovery. Disabling an account must
+also permanently revoke its sessions, preferably atomically; otherwise enabling
+it again reactivates unexpired sessions. No account-management flow enforces
+this yet. Do not expose these helpers or connect real accounts until all of
+those are designed and reviewed.
+
+Workers Web Crypto has an implementation limit on PBKDF2 iterations; see the
+[workerd discussion](https://github.com/cloudflare/workerd/issues/1346). Do not
+silently reduce password-hash strength or assume a local test proves production
+limits. Choose and test an appropriate authentication design before wiring a
+login flow to session issuance.
