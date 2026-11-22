@@ -79,7 +79,7 @@
       resetToken: 'Reset system token', buildIndex: 'Build FTS5 index', clearIndex: 'Clear search index', indexProgress: 'Index progress',
       tokenReset: 'System token reset. Copy it now; it will not be shown again.', copyToken: 'Copy token', indexedCount: '{n} indexed files',
       settingsDesc: 'Configure public workspace behavior, session limits, download links, and full-text indexing.',
-      ok: 'OK', error: 'Error', success: 'Success', warning: 'Warning', operationFailed: 'The operation could not be completed.',
+      ok: 'OK', error: 'Error', success: 'Success', warning: 'Warning', operationFailed: 'The operation could not be completed.', backendUnavailable: 'Kova server is unavailable. Deploy a persistent origin and configure the Cloudflare proxy; static files alone cannot run the workspace.',
       viewShortcuts: 'Show keyboard shortcuts', shortcutAction: 'Action', shortcutKey: 'Shortcut',
       shortcutSearch: 'Search and commands', shortcutFilter: 'Filter this folder', shortcutMove: 'Move between files', shortcutOpen: 'Open or preview',
       shortcutParent: 'Go to parent folder', shortcutSelect: 'Select focused item', shortcutRename: 'Rename selected item', shortcutDelete: 'Delete selected items', shortcutHelp: 'Show this help',
@@ -153,7 +153,7 @@
       maxDevices: 'Số thiết bị tối đa mỗi người dùng', sessionTtl: 'Thời hạn phiên (giây)', forwardParams: 'Chuyển tiếp tham số liên kết trực tiếp', saveSettings: 'Lưu cài đặt', settingsSaved: 'Đã lưu cài đặt.',
       resetToken: 'Đặt lại mã hệ thống', buildIndex: 'Tạo chỉ mục FTS5', clearIndex: 'Xóa chỉ mục tìm kiếm', indexProgress: 'Tiến độ chỉ mục', tokenReset: 'Đã đặt lại mã hệ thống. Hãy sao chép ngay, mã sẽ không hiển thị lại.',
       copyToken: 'Sao chép mã', indexedCount: 'Đã lập chỉ mục {n} tệp', settingsDesc: 'Cấu hình hành vi công khai, giới hạn phiên, liên kết tải và lập chỉ mục toàn văn.',
-      ok: 'Đồng ý', error: 'Lỗi', success: 'Thành công', warning: 'Cảnh báo', operationFailed: 'Không thể hoàn tất thao tác.', viewShortcuts: 'Xem phím tắt', shortcutAction: 'Thao tác', shortcutKey: 'Phím tắt',
+      ok: 'Đồng ý', error: 'Lỗi', success: 'Thành công', warning: 'Cảnh báo', operationFailed: 'Không thể hoàn tất thao tác.', backendUnavailable: 'Không kết nối được máy chủ Kova. Hãy triển khai server có dữ liệu bền vững và cấu hình proxy Cloudflare; chỉ có giao diện tĩnh là không đủ.', viewShortcuts: 'Xem phím tắt', shortcutAction: 'Thao tác', shortcutKey: 'Phím tắt',
       shortcutSearch: 'Tìm kiếm và lệnh', shortcutFilter: 'Lọc thư mục', shortcutMove: 'Di chuyển giữa các tệp', shortcutOpen: 'Mở hoặc xem trước', shortcutParent: 'Đến thư mục cha',
       shortcutSelect: 'Chọn mục đang focus', shortcutRename: 'Đổi tên mục đã chọn', shortcutDelete: 'Xóa mục đã chọn', shortcutHelp: 'Hiển thị trợ giúp', notFound: 'Không tìm thấy mục được yêu cầu.', item: 'Mục', unknown: 'Không rõ', never: 'Không bao giờ', bytes: 'byte',
       choose: 'Chọn', clear: 'Xóa', action: 'Thao tác', allFiles: 'Tất cả tệp', filesSelected: 'Tệp đã chọn', folderSelected: 'Thư mục đã chọn', sortAscending: 'Tăng dần', sortDescending: 'Giảm dần', noResults: 'Không có kết quả. Hãy thử truy vấn khác.',
@@ -1043,7 +1043,12 @@
       $('versionBadge').textContent = String(state.settings.version || 'v4.2.0').replace(/^v/, 'v').slice(0, 6);
       document.title = `${$('siteTitle').textContent} · Kova`;
       if (state.settings.announcement) { $('announcementText').textContent = state.settings.announcement; $('announcementBar').hidden = state.announcementDismissed; }
-    } catch {}
+    } catch {
+      $('announcementText').textContent = t('backendUnavailable');
+      $('announcementBar').hidden = false;
+      $('btnAuth').disabled = true;
+      $('btnTopAdmin').hidden = true;
+    }
     await refreshIdentity();
     if (state.user && Number(state.user.role) === 2) $('btnTopAdmin').hidden = false;
     const match = location.pathname.match(/^\/s\/([^/]+)\/?$/);

@@ -33,7 +33,9 @@ creates a paid persistent disk and generates an initial admin password; review
 the plan and costs before confirming and retrieve the password from Render
 service environment settings. These links target the upstream repository, not
 your fork; for a fork select your repository in the provider dashboard.
-See the [platform deployment guide](docs/platform-deployment.md) for Railway,
+A separate [Cloudflare Pages proxy](deploy/cloudflare-pages/README.md) also
+requires that origin. Deploying `web` as static files alone cannot provide the
+server or data. See the [platform deployment guide](docs/platform-deployment.md) for Railway,
 Fly.io, Heroku, persistence, backup, scaling and first-start instructions.
 
 ## Build and run

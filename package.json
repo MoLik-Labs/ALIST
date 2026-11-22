@@ -9,7 +9,8 @@
     "test:worker": "node tests/cloudflare_worker_test.mjs",
     "test:docs": "node tests/docs_smoke.mjs",
     "test:go-ui": "node tests/go_webui_smoke.mjs",
-    "test:skills": "node tests/skills_integrity.mjs"
+    "test:skills": "node tests/skills_integrity.mjs",
+    "test:pages": "node tests/cloudflare_pages_test.mjs"
   },
   "devDependencies": {
     "happy-dom": "21.0.4"

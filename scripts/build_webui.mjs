@@ -182,8 +182,9 @@ function checkViolet(css) {
 const [htmlRaw, cssRaw, jsRaw] = await Promise.all([
   readFile(paths.html, 'utf8'), readFile(paths.css, 'utf8'), readFile(paths.js, 'utf8')
 ]);
-if ((htmlRaw.match(/\/\*__INLINE_CSS__\*\//g) || []).length !== 1) fail('index.html must contain one CSS inline placeholder');
-if ((htmlRaw.match(/\/\*__INLINE_JS__\*\//g) || []).length !== 1) fail('index.html must contain one JavaScript inline placeholder');
+const cssTag = '<link rel="stylesheet" href="/styles.css">';
+const jsTag = '<script src="/app.js" defer></script>';
+if (htmlRaw.split(cssTag).length !== 2 || htmlRaw.split(jsTag).length !== 2) fail('index.html must contain exactly one local CSS and JS asset tag');
 
 const dictionary = parseI18n(jsRaw);
 const enKeys = Object.keys(dictionary.en || {}).sort();
@@ -200,7 +201,7 @@ const minSyntax = spawnSync(process.execPath, ['--check', '--input-type=commonjs
 if (minSyntax.status !== 0) fail(`minified JavaScript syntax error:\n${minSyntax.stderr || minSyntax.stdout}`);
 const css = minifyCss(cssRaw);
 const htmlShell = htmlRaw.replace(/<!--[\s\S]*?-->/g, '').replace(/[ \t]+$/gm, '').replace(/^\s+$/gm, '').trim();
-const html = htmlShell.replace('/*__INLINE_CSS__*/', css).replace('/*__INLINE_JS__*/', js);
+const html = htmlShell.replace(cssTag, `<style>\n${css}\n</style>`).replace(jsTag, `<script>\n${js}\n</script>`);
 const scriptOpen = (html.match(/<script>/gi) || []).length;
 const scriptClose = (html.match(/<\/script>/gi) || []).length;
 if (scriptOpen !== 1 || scriptClose !== 1) fail(`embedded UI must have exactly one inline script (found ${scriptOpen} open, ${scriptClose} close)`);
