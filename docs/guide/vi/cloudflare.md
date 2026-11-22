@@ -1,6 +1,6 @@
 # Cloudflare: mỗi thành phần chạy ở đâu?
 
-Cloudflare Workers hỗ trợ JavaScript, TypeScript, Python và Rust; WebAssembly còn hỗ trợ ngôn ngữ khác. Không phải chỉ có TypeScript. Server Linux native thông thường không thể đưa nguyên xi lên Worker. Muốn Kova chạy độc lập cần viết backend riêng cho runtime Cloudflare, kết hợp dịch vụ bền vững như D1 và R2. **Repo mới có bộ đọc R2 thử nghiệm và tải tệp nhỏ chỉ tạo mới khi bật tùy chọn; backend hoàn chỉnh chưa được triển khai.**
+Cloudflare Workers hỗ trợ JavaScript, TypeScript, Python và Rust; WebAssembly còn hỗ trợ ngôn ngữ khác. Không phải chỉ có TypeScript. Server Linux native thông thường không thể đưa nguyên xi lên Worker. Muốn Kova chạy độc lập cần viết backend riêng cho runtime Cloudflare, kết hợp dịch vụ bền vững như D1 và R2. **Repo mới có bộ đọc R2 thử nghiệm, tải tệp nhỏ chỉ tạo mới khi bật tùy chọn và connector Google Drive chỉ đọc cho một tài khoản; backend hoàn chỉnh chưa được triển khai. Connector Google Drive mới kiểm thử bằng giả lập phản hồi, chưa tích hợp giao diện.**
 
 Worker và Pages hiện tại chỉ chuyển tiếp request tới server Kova đặt ở nơi khác. Chúng không tự tạo database, tài khoản, driver tệp hay server gốc.
 

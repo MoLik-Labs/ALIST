@@ -50,3 +50,33 @@ This is an emulated, empty R2 bucket and a public example token for local use
 only. Do not deploy this configuration, use this token remotely, or replace
 it with a real secret on a command line. Emulation does not verify Cloudflare
 account bindings, resource limits or real R2 behavior. Stop the server when done.
+
+## Experimental Google Drive connector
+
+The isolated Worker also has a **single-account, read-only prototype**:
+`GET /v1/google-drive/files?parent=root` lists a folder (optional opaque
+`cursor`; the response has `nextPageToken`) and
+`GET /v1/google-drive/file?id=...` streams a binary file. These routes use the
+same bearer token as the R2 API and do not require the R2 binding. Anyone with
+that token can access **all files authorized to the connected Google account**,
+not just one folder. Native Google Docs, Sheets and Slides require export and
+are not supported. Upload, search, range/resume, shortcuts, OAuth consent UI,
+per-user credentials, permissions, credential revocation, rate limiting and
+multi-drive management are not implemented. There is no Kova UI integration.
+
+For a future isolated experiment, Google Drive API must be enabled, an OAuth
+client and an offline refresh token obtained securely with a suitable read-only
+scope, and `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and
+`GOOGLE_REFRESH_TOKEN` set as Worker runtime secrets, alongside a strong
+`KOVA_NATIVE_TOKEN`. **Do not paste credentials in commands, issues or chat.**
+Use a disposable Google account and files only. Google OAuth verification,
+testing-mode restrictions, token expiry/revocation and quotas apply; a refresh
+token is not guaranteed to remain valid. Consult Google's
+[web server OAuth guide](https://developers.google.com/identity/protocols/oauth2/web-server)
+and [Drive scope guide](https://developers.google.com/workspace/drive/api/guides/api-specific-auth).
+This code refreshes on every request; it does not cache tokens or retry quota
+errors. It fixes upstream hosts and rejects redirects, strips upstream headers,
+limits JSON responses, and never returns credentials in errors. Downloads have a
+30-second deadline; large files and redirects may fail. **Mocks only:** this has
+not been exercised against a real Google account or deployed Worker. Do not use
+it for production or sensitive data. Revoke credentials after experimentation.

@@ -43,6 +43,9 @@ jobs:
       - name: Test experimental Cloudflare-native reader
         run: npm run test:cf-native
 
+      - name: Test experimental Cloudflare Google Drive connector
+        run: npm run test:cf-google-drive
+
       - name: Check native platform deployment configuration
         run: |
           python3 tests/platform_config_smoke.py

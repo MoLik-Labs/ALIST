@@ -1,5 +1,7 @@
 // Experimental standalone Cloudflare-native R2 API. This is NOT the Kova
 // API or a production-ready server. Do not attach production data.
+import { googleDriveRequest } from './google-drive.js';
+
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 const json = (status, payload) => new Response(JSON.stringify(payload), {
   status,
@@ -28,11 +30,16 @@ function safeText(value, max) {
 export async function handleRequest(request, env) {
   const url = new URL(request.url);
   if (request.method === 'GET' && url.pathname === '/ping') return json(200, { ok: true, experimental: true });
-  if (!env?.R2 || typeof env?.KOVA_NATIVE_TOKEN !== 'string' || env.KOVA_NATIVE_TOKEN.length < 32 || env.KOVA_NATIVE_TOKEN.length > 1024) {
+  if (typeof env?.KOVA_NATIVE_TOKEN !== 'string' || env.KOVA_NATIVE_TOKEN.length < 32 || env.KOVA_NATIVE_TOKEN.length > 1024) {
     return json(503, { error: 'Experimental backend is not configured' });
   }
   if (!await authorized(request, env.KOVA_NATIVE_TOKEN)) return json(401, { error: 'Unauthorized' });
   if (request.method !== 'GET' && request.method !== 'PUT') return json(405, { error: 'Method not allowed' });
+  if (url.pathname.startsWith('/v1/google-drive/')) {
+    if (request.method !== 'GET') return json(405, { error: 'Method not allowed' });
+    return googleDriveRequest(url, env);
+  }
+  if (!env.R2) return json(503, { error: 'R2 is not configured' });
   try {
     if (request.method === 'PUT') {
       if (url.pathname !== '/v1/object') return json(404, { error: 'Not found' });

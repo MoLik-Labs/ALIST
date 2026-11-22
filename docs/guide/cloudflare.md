@@ -1,6 +1,6 @@
 # Cloudflare: what runs where?
 
-Cloudflare Workers support JavaScript, TypeScript, Python and Rust, and also WebAssembly for other languages. TypeScript is not the only option. A normal native Linux server cannot simply be deployed as a Worker. A standalone Kova backend would need a separate implementation using Cloudflare runtime APIs and persistent services such as D1 and R2. **Only an experimental R2 reader with opt-in small create-only uploads exists; the complete backend is not implemented.**
+Cloudflare Workers support JavaScript, TypeScript, Python and Rust, and also WebAssembly for other languages. TypeScript is not the only option. A normal native Linux server cannot simply be deployed as a Worker. A standalone Kova backend would need a separate implementation using Cloudflare runtime APIs and persistent services such as D1 and R2. **An experimental R2 reader with opt-in small create-only uploads and a single-account read-only Google Drive connector exist; the complete backend is not implemented. The Google Drive connector is tested with mocks only and is not integrated into the UI.**
 
 The current Worker and Pages projects forward requests to a Kova server you host elsewhere. They do not create a database, accounts, file drivers, or a Kova origin.
 
