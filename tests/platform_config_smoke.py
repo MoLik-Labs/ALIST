@@ -19,7 +19,7 @@ assert (worker / wrangler['main']).is_file()
 assert 'KOVA_ORIGIN=' in (worker / '.dev.vars.example').read_text()
 assert 'KOVA_ORIGIN' in json.loads((worker / 'package.json').read_text())['cloudflare']['bindings']
 readme = (root / 'README.md').read_text()
-assert 'render.com/deploy?repo=' in readme
+assert 'render.com/deploy?repo=https%3A%2F%2Fgithub.com%2FMoLik-Labs%2FKova-INC' in readme
 assert 'deploy.workers.cloudflare.com/?url=' in readme
 assert 'public repository' in readme and 'edge proxy' in readme
 render = (root / 'render.yaml').read_text()

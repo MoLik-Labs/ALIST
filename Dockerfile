@@ -36,7 +36,7 @@ FROM debian:bookworm-slim
 LABEL org.opencontainers.image.title="Kova" \
       org.opencontainers.image.description="Kova Native C++20 Multi-Storage Workspace" \
       org.opencontainers.image.authors="MoLik Labs" \
-      org.opencontainers.image.source="https://github.com/MoLik-Labs/ALIST" \
+      org.opencontainers.image.source="https://github.com/MoLik-Labs/Kova-INC" \
       org.opencontainers.image.version="4.2.0" \
       org.opencontainers.image.licenses="AGPL-3.0"
 

@@ -4,7 +4,7 @@ This Worker is a **reverse proxy to an already-running Kova origin**. It does no
 
 ## Deploy
 
-[![Deploy Cloudflare edge proxy](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FMoLik-Labs%2FALIST%2Ftree%2FBETA%2Fdeploy%2Fcloudflare-worker)
+[![Deploy Cloudflare edge proxy](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FMoLik-Labs%2FKova-INC%2Ftree%2FBETA%2Fdeploy%2Fcloudflare-worker)
 
 The button requires a public repository and deploys only this proxy. It uses
 the `BETA` branch. You still need a
