@@ -147,3 +147,19 @@ func FuzzPresignObjectKey(f *testing.F) {
 		}
 	})
 }
+
+func BenchmarkPresignGet(b *testing.B) {
+	c, err := New(Config{BucketURL: "https://example.com/bucket", Region: "us-east-1", AccessKey: "access", SecretKey: "secret"})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer c.Close()
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := c.presignGet("folder/example file.txt", at, 60); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

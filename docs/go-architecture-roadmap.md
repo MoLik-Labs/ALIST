@@ -27,7 +27,7 @@ Cloudflare Worker is not a substitute for either storage or database.
 
 1. S3-compatible driver: signed reads, streaming, listing and pagination,
    uploads/multipart, deletion, failure/cancellation handling and integration
-   tests against a real compatible service. The experimental client now supports reads and paginated listings;
+   tests against a real compatible service. The experimental client now supports reads, object metadata and paginated listings;
    do not expose it to users until authorization and configuration are wired.
 2. Storage abstraction, VFS mounts and configuration, guarded outbound
    connections, safe credential storage and administrator setup.

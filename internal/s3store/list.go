@@ -44,7 +44,7 @@ func (c *Client) ListPage(ctx context.Context, prefix, token string) (Page, erro
 	if token != "" {
 		params["continuation-token"] = token
 	}
-	signed, err := c.presign("", params, time.Now(), 60)
+	signed, err := c.presign(http.MethodGet, "", params, time.Now(), 60)
 	if err != nil {
 		return Page{}, ErrRequestFailed
 	}

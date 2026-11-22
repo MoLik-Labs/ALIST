@@ -116,10 +116,10 @@ func (c *Client) presignGet(key string, at time.Time, ttl int) (string, error) {
 	if !validKey(key) || ttl < 1 || ttl > 604800 || at.IsZero() {
 		return "", errors.New("invalid object request")
 	}
-	return c.presign(key, nil, at, ttl)
+	return c.presign(http.MethodGet, key, nil, at, ttl)
 }
 
-func (c *Client) presign(key string, extra map[string]string, at time.Time, ttl int) (string, error) {
+func (c *Client) presign(method, key string, extra map[string]string, at time.Time, ttl int) (string, error) {
 	at = at.UTC()
 	day := at.Format("20060102")
 	stamp := at.Format("20060102T150405Z")
@@ -143,7 +143,7 @@ func (c *Client) presign(key string, extra map[string]string, at time.Time, ttl 
 		parts = append(parts, awsEscape(k, false)+"="+awsEscape(params[k], false))
 	}
 	query := strings.Join(parts, "&")
-	canonical := "GET\n" + encodedPath + "\n" + query + "\nhost:" + c.endpoint.Host + "\n\nhost\nUNSIGNED-PAYLOAD"
+	canonical := method + "\n" + encodedPath + "\n" + query + "\nhost:" + c.endpoint.Host + "\n\nhost\nUNSIGNED-PAYLOAD"
 	digest := sha256.Sum256([]byte(canonical))
 	stringToSign := "AWS4-HMAC-SHA256\n" + stamp + "\n" + scope + "\n" + hex.EncodeToString(digest[:])
 	dateKey := hmacSHA256([]byte("AWS4"+c.secretKey), day)
