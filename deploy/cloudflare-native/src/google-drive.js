@@ -71,7 +71,9 @@ export async function googleDriveRequest(url, env) {
     });
     if (upstream.status === 404) return error(404, 'Not found');
     if (upstream.status === 429 || upstream.status === 503) return error(503, 'Google Drive temporarily unavailable');
-    if (!upstream.ok) return error(502, 'Google Drive request failed');
+    // No range request was sent; an unexpected partial or empty success must
+    // not be presented to the client as a complete 200 download/listing.
+    if (upstream.status !== 200) return error(502, 'Google Drive request failed');
     if (list) {
       const data = await readJson(upstream);
       if (!Array.isArray(data.files)) throw new Error('Invalid response');

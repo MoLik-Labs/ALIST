@@ -58,7 +58,12 @@ export async function resolveReadShare(db, token, now = nowSeconds()) {
   const row = await db.prepare(`SELECT s.resource_id FROM bearer_shares AS s
     JOIN resources AS r ON r.id = s.resource_id AND r.deleted_at IS NULL
     JOIN users AS u ON u.id = s.created_by AND u.disabled = 0
-    WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > ? LIMIT 1`).bind(digest, now).first();
+    WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > ? AND (
+      r.owner_id = u.id OR EXISTS (
+        SELECT 1 FROM user_roles AS ur JOIN resource_role_grants AS g ON g.role_id = ur.role_id
+        WHERE ur.user_id = u.id AND g.resource_id = r.id AND g.action = 'share'
+      )
+    ) LIMIT 1`).bind(digest, now).first();
   return row?.resource_id || null;
 }
 

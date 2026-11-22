@@ -86,13 +86,16 @@ it for production or sensitive data. Revoke credentials after experimentation.
 `migrations/0001_access_foundation.sql` and `src/access.js` are isolated
 experimental D1-oriented primitives for private-by-default resources, explicit
 role grants and read-only bearer links with expiry and revocation. The schema
-and queries are tested against SQLite locally via `npm run test:cf-access`;
-D1 itself and real Cloudflare have not been tested. The prototype's existing
+and queries are tested against SQLite locally via `npm run test:cf-access` and
+against the local workerd/D1 emulator in CI. Real Cloudflare D1 has not been
+tested. The prototype's existing
 HTTP endpoints **do not call these primitives**: they still use a single shared
 bearer token and must not be treated as a multi-user system. Authentication,
 role assignment, per-user grants, restricted-recipient links, password links,
 provider credential isolation, folder inheritance and all UI integration remain
-unimplemented. Role changes do not automatically revoke links already issued;
-links require explicit revocation or expiry. A deployment operator can access
-plaintext by changing Worker code or bindings. Do not use this as a security
+unimplemented. Links are denied while their creator lacks the share grant, but
+restoring that grant reactivates unexpired links unless explicitly revoked. Role
+management must revoke relevant links transactionally when removing grants if
+permanent revocation is required. A deployment operator can access plaintext by
+changing Worker code or bindings. Do not use this as a security
 boundary until integrated and reviewed end to end.

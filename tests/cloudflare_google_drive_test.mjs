@@ -14,6 +14,7 @@ globalThis.fetch = async (url, options) => {
   }
   if (mode === 'redirect') return new Response(null, { status: 302, headers: { location: 'https://evil.test/steal' } });
   if (mode === 'download') return new Response('hello', { headers: { 'content-type': 'text/html', 'set-cookie': 'bad=1' } });
+  if (mode === 'partial') return new Response('part', { status: 206 });
   if (mode === 'oversize') return new Response('a'.repeat(1024 * 1024 + 1));
   return Response.json({ nextPageToken: 'next', files: [{ id: 'file-1', name: 'File', mimeType: 'text/plain', extra: 'omit' }], secret: 'omit' });
 };
@@ -41,6 +42,8 @@ try {
   assert.equal(response.headers.get('content-type'), 'application/octet-stream');
   assert.equal(response.headers.get('set-cookie'), null);
   assert.equal(await response.text(), 'hello');
+  mode = 'partial';
+  assert.equal((await handleRequest(makeRequest('/v1/google-drive/file?id=file-1'), env)).status, 502);
   mode = 'redirect';
   response = await handleRequest(makeRequest('/v1/google-drive/file?id=file-1'), env);
   assert.equal(response.status, 502);
