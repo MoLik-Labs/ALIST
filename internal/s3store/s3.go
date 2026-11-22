@@ -1,5 +1,5 @@
 // Package s3store implements an experimental, read-only S3-compatible object
-// reader. It is not yet connected to Kova's VFS or a production server.
+// reader and paginated lister. It is not yet connected to Kova's VFS or a production server.
 package s3store
 
 import (
@@ -116,6 +116,10 @@ func (c *Client) presignGet(key string, at time.Time, ttl int) (string, error) {
 	if !validKey(key) || ttl < 1 || ttl > 604800 || at.IsZero() {
 		return "", errors.New("invalid object request")
 	}
+	return c.presign(key, nil, at, ttl)
+}
+
+func (c *Client) presign(key string, extra map[string]string, at time.Time, ttl int) (string, error) {
 	at = at.UTC()
 	day := at.Format("20060102")
 	stamp := at.Format("20060102T150405Z")
@@ -123,6 +127,9 @@ func (c *Client) presignGet(key string, at time.Time, ttl int) (string, error) {
 	uri := strings.TrimSuffix(c.endpoint.Path, "/") + "/" + key
 	encodedPath := awsEscape(uri, true)
 	params := map[string]string{"X-Amz-Algorithm": "AWS4-HMAC-SHA256", "X-Amz-Credential": c.accessKey + "/" + scope, "X-Amz-Date": stamp, "X-Amz-Expires": strconv.Itoa(ttl), "X-Amz-SignedHeaders": "host"}
+	for k, v := range extra {
+		params[k] = v
+	}
 	if c.sessionToken != "" {
 		params["X-Amz-Security-Token"] = c.sessionToken
 	}
