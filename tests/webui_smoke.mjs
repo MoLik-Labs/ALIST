@@ -20,7 +20,7 @@ async function eventually(predicate, message, timeout = 2000) {
   assert.fail(message);
 }
 
-function createHarness({ path = '/', role = 2, items = [] } = {}) {
+function createHarness({ path = '/', role = 2, items = [], backendDown = false } = {}) {
   const window = new Window({ url: `http://kova.test${path}` });
   window.document.write(html);
   window.document.close();
@@ -66,6 +66,7 @@ function createHarness({ path = '/', role = 2, items = [] } = {}) {
     }
     calls.push({ path: url.pathname, query: url.searchParams, method: options.method || 'GET', body, headers: options.headers || {} });
     const pathName = url.pathname;
+    if (backendDown) throw new Error('network unavailable');
     if (pathName === '/api/public/settings') return response({ app_name: 'Kova', site_title: 'Kova', version: 'v4.2.0', guest_enabled: true });
     if (pathName === '/api/me') return response(user);
     if (pathName === '/api/fs/list') return response({ content: files, total: files.length, write: role === 2, provider: 'Local', readme: '# Workspace' });
@@ -239,4 +240,20 @@ await testExplorerAndAdmin();
 await testDynamicExplorerDialogs();
 await testPublicShare();
 await testGuestControls();
+// The source index must work as static HTML rather than shipping build markers.
+const rawIndex = await readFile(new URL('../web/index.html', import.meta.url), 'utf8');
+assert.match(rawIndex, /<link rel="stylesheet" href="\/styles\.css">/);
+assert.match(rawIndex, /<script src="\/app\.js" defer><\/script>/);
+assert.ok(!rawIndex.includes('__INLINE_'));
+{
+  const { window } = createHarness({ backendDown: true });
+  await eventually(() => !window.document.getElementById('announcementBar').hidden, 'Missing backend warning');
+  assert.match(window.document.getElementById('announcementText').textContent, /server is unavailable/i);
+  assert.equal(window.document.getElementById('btnAuth').disabled, true);
+  assert.equal(window.document.querySelector('[data-act="dismiss-announcement"]').hidden, true);
+  window.document.getElementById('btnLang').click();
+  assert.match(window.document.getElementById('announcementText').textContent, /Không kết nối được máy chủ Kova/);
+  window.close();
+}
+
 console.log('Embedded minified Web UI smoke passed: virtualized explorer, EN/VI and theme controls, FTS palette, all admin tabs, 17-bit RBAC, dynamic driver/preview/picker/token DOM, public share password/XSS rendering, and guest controls.');

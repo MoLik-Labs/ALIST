@@ -95,8 +95,10 @@ Builds, select its deployment branch, and set root directory to
 `deploy/cloudflare-worker`; configure `KOVA_ORIGIN` as a runtime secret (build
 secrets are not runtime bindings). The README button targets the upstream repo,
 not the fork. Cloudflare's deploy button supports Workers,
-not Pages. There is no standalone Kova Pages deployment: the UI is embedded in
-the native server and the APIs and data need a separate origin. The proxy does
+not Pages. A Pages Functions proxy is also provided in
+[deploy/cloudflare-pages](../deploy/cloudflare-pages/README.md); it requires a
+separate persistent origin and is not a standalone server. The `web` directory
+by itself contains only the UI and cannot provide APIs or data. The proxy does
 not cache private workspace responses, and Cloudflare upload limits and origin
 latency still apply. Restrict origin access before trusting forwarded headers.
 

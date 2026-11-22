@@ -37,13 +37,51 @@ jobs:
       - name: Test Cloudflare Worker proxy behavior
         run: npm run test:worker
 
+      - name: Test Cloudflare Pages proxy adapter
+        run: npm run test:pages
+
+      - name: Test experimental Cloudflare-native reader
+        run: npm run test:cf-native
+
+      - name: Test experimental Cloudflare Google Drive connector
+        run: npm run test:cf-google-drive
+
+      - name: Test experimental Cloudflare access foundation
+        run: npm run test:cf-access
+
+      - name: Test experimental Cloudflare session primitives
+        run: npm run test:cf-sessions
+
+      - name: Test experimental Cloudflare user-management primitives
+        run: npm run test:cf-users
+
+      - name: Test experimental Cloudflare role management
+        run: npm run test:cf-roles
+
+      - name: Test experimental Cloudflare credential vault
+        run: npm run test:cf-vault
+
+      - name: Test experimental connected Google Drive isolation
+        run: npm run test:cf-connected-drive
+
+      - name: Test experimental Google OAuth flow
+        run: npm run test:cf-google-oauth
+
+      - name: Test experimental Google identity and login
+        run: |
+          npm run test:cf-identity
+          npm run test:cf-login
+
       - name: Check native platform deployment configuration
         run: |
           python3 tests/platform_config_smoke.py
           python3 tests/native_entrypoint_smoke.py
 
-      - name: Test documentation navigation
-        run: npm run test:docs
+      - name: Test documentation navigation and build bilingual docs
+        run: |
+          npm run test:docs
+          npm run docs:build
+          npm run test:docs-build
 
       - name: Test Go workspace UI
         run: npm run test:go-ui
@@ -88,7 +126,20 @@ jobs:
       - name: Validate Cloudflare Worker bundle with Wrangler
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
+          node ../../tests/cloudflare_access_workerd_test.mjs
+          node ../../tests/cloudflare_sessions_workerd_test.mjs
+          node ../../tests/cloudflare_user_management_workerd_test.mjs
+          node ../../tests/cloudflare_role_management_workerd_test.mjs
+          node ../../tests/cloudflare_credential_vault_workerd_test.mjs
+          node ../../tests/cloudflare_connected_drive_workerd_test.mjs
+          node ../../tests/cloudflare_google_oauth_workerd_test.mjs
+          node ../../tests/cloudflare_google_identity_workerd_test.mjs
+          node ../../tests/cloudflare_google_login_workerd_test.mjs
           npx wrangler deploy --dry-run
+          cd ../cloudflare-pages
+          ../cloudflare-worker/node_modules/.bin/wrangler pages functions build functions --outdir /tmp/kova-pages-ci --compatibility-date 2026-11-16
+          cd ../cloudflare-native
+          ../cloudflare-worker/node_modules/.bin/wrangler deploy src/index.js --name kova-native-preview --compatibility-date 2026-11-16 --dry-run
         working-directory: deploy/cloudflare-worker
 
       - name: Install native C++20 dependencies

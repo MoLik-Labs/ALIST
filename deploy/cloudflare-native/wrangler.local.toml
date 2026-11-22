@@ -1,0 +1,9 @@
+# Local test only: never deploy this configuration or attach production data.
+name = "kova-native-local-test"
+main = "src/index.js"
+compatibility_date = "2026-11-16"
+workers_dev = false
+
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "kova-native-local-test"
