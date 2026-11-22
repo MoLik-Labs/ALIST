@@ -164,8 +164,30 @@ owner's Google token and uses the same limited read-only connector. It is tested
 with mock Google responses and local workerd/D1 emulation only.
 
 **Do not enable or deploy for users:** there is no trusted login, session
-issuance, OAuth consent, connection provisioning/revocation, D1 migration
-deployment, throttling or UI, and no real provider test. It does not implement
+issuance, consent UI, connection management/revocation, D1 migration
+deployment, durable throttling or UI, and no real provider test. It does not implement
 roles, resource sharing or Kova API compatibility. The test harness seeds users,
 sessions and connections directly and is not part of the Worker. The v1 shared
 bearer routes remain separate and would bypass these owner checks if enabled.
+
+
+## OAuth connection experiment (disabled)
+
+An opt-in `/v2/google-drive/oauth/start` and callback prototype requests the
+Google Drive read-only scope using PKCE, a random single-use state, an encrypted
+short-lived verifier and a live initiating session. It stores the refresh token
+in the experimental owner-scoped vault. OAuth requires both experimental flags
+and a configured fixed HTTPS callback URI; the actual application has no login
+or connection UI. Issuance of sessions is not exposed. The flow has mock and
+local D1/workerd tests only and has not been verified with Google or deployed
+Cloudflare resources. **Do not enable it for users or sensitive data.**
+
+The callback URL contains an authorization code and state. Logging, referrer
+leaks, provider error handling, consent denial, quotas, cleanup of abandoned
+flows, credential recovery and revocation, user-visible confirmations and rate
+limits need an end-to-end security design. A failed callback consumes the state;
+retry requires a fresh attempt. If a token exchange succeeds but persistence
+fails, a provider authorization can remain active; revoke it in Google account
+settings. The read-only scope, Google verification rules and account testing
+restrictions may require additional approval. No secret should be printed or
+shared in chat, logs or Git.

@@ -30,18 +30,22 @@ function checkedCredentials(value) {
 }
 
 // This grants no sharing rights. Only the enabled record owner can read/delete.
-export async function createGoogleConnection(db, secret, actorId, input, now = nowSeconds()) {
+export async function createGoogleConnection(db, secret, actorId, input, now = nowSeconds(), requiredSessionHash = null) {
   const credentials = checkedCredentials(input);
-  if (!validId(actorId) || !validTime(now) || !credentials) return null;
+  if (!validId(actorId) || !validTime(now) || !credentials || (requiredSessionHash !== null && (typeof requiredSessionHash !== 'string' || !/^[a-f0-9]{64}$/.test(requiredSessionHash)))) return null;
   const plaintext = enc.encode(JSON.stringify(credentials));
   if (plaintext.byteLength > 32768) return null;
   const key = await importKey(secret);
   const id = toBase64Url(crypto.getRandomValues(new Uint8Array(16)));
   const nonce = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce, additionalData: aad(id, actorId) }, key, plaintext));
+  const guard = requiredSessionHash === null ? '' : ` AND EXISTS (
+    SELECT 1 FROM sessions AS s WHERE s.token_hash = ? AND s.user_id = users.id
+      AND s.revoked_at IS NULL AND s.expires_at > ?)`;
+  const params = [id, PROVIDER, toBase64Url(nonce), toBase64Url(ciphertext), now, actorId];
+  if (requiredSessionHash !== null) params.push(requiredSessionHash, now);
   const result = await db.prepare(`INSERT INTO provider_connections (id,owner_id,provider,vault_version,nonce,ciphertext,created_at)
-    SELECT ?,id,?,1,?,?,? FROM users WHERE id = ? AND disabled = 0`)
-    .bind(id, PROVIDER, toBase64Url(nonce), toBase64Url(ciphertext), now, actorId).run();
+    SELECT ?,id,?,1,?,?,? FROM users WHERE id = ? AND disabled = 0${guard}`).bind(...params).run();
   return result.meta?.changes === 1 ? id : null;
 }
 

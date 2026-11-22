@@ -2,6 +2,7 @@
 // API or a production-ready server. Do not attach production data.
 import { googleDriveRequest } from './google-drive.js';
 import { connectedDriveRequest } from './connected-drive.js';
+import { googleOauthRequest } from './google-oauth.js';
 
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 const json = (status, payload) => new Response(JSON.stringify(payload), {
@@ -31,6 +32,7 @@ function safeText(value, max) {
 export async function handleRequest(request, env) {
   const url = new URL(request.url);
   if (request.method === 'GET' && url.pathname === '/ping') return json(200, { ok: true, experimental: true });
+  if (url.pathname.startsWith('/v2/google-drive/oauth/')) return googleOauthRequest(request, env);
   if (url.pathname.startsWith('/v2/')) return connectedDriveRequest(request, env);
   if (typeof env?.KOVA_NATIVE_TOKEN !== 'string' || env.KOVA_NATIVE_TOKEN.length < 32 || env.KOVA_NATIVE_TOKEN.length > 1024) {
     return json(503, { error: 'Experimental backend is not configured' });

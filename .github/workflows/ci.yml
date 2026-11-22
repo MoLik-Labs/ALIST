@@ -64,6 +64,9 @@ jobs:
       - name: Test experimental connected Google Drive isolation
         run: npm run test:cf-connected-drive
 
+      - name: Test experimental Google OAuth flow
+        run: npm run test:cf-google-oauth
+
       - name: Check native platform deployment configuration
         run: |
           python3 tests/platform_config_smoke.py
@@ -124,6 +127,7 @@ jobs:
           node ../../tests/cloudflare_role_management_workerd_test.mjs
           node ../../tests/cloudflare_credential_vault_workerd_test.mjs
           node ../../tests/cloudflare_connected_drive_workerd_test.mjs
+          node ../../tests/cloudflare_google_oauth_workerd_test.mjs
           npx wrangler deploy --dry-run
           cd ../cloudflare-pages
           ../cloudflare-worker/node_modules/.bin/wrangler pages functions build functions --outdir /tmp/kova-pages-ci --compatibility-date 2026-11-16
