@@ -94,9 +94,13 @@ bearer token and must not be treated as a multi-user system. Authentication,
 role assignment, per-user grants, restricted-recipient links, password links,
 provider credential isolation, folder inheritance and all UI integration remain
 unimplemented. Links are denied while their creator lacks the share grant, but
-restoring that grant reactivates unexpired links unless explicitly revoked. Role
-management must revoke relevant links transactionally when removing grants if
-permanent revocation is required. A deployment operator can access plaintext by
+restoring that grant can reactivate unexpired links unless explicitly revoked.
+The isolated `removeResourceRoleGrant` primitive atomically revokes links created
+by members of the affected role when the resource owner removes its share grant;
+it conservatively revokes links even if another role grants share permission.
+This primitive is not connected to a management endpoint. Direct database edits,
+role-membership changes and other grant-change paths do not enforce this rule;
+all such paths require equivalent transactional handling before integration. A deployment operator can access plaintext by
 changing Worker code or bindings. Do not use this as a security
 boundary until integrated and reviewed end to end.
 
@@ -111,8 +115,12 @@ flow verifies identity. There is no password authentication, login UI, reset,
 2FA, CSRF policy, session cookie handling, brute-force protection, multi-user
 provider authorization or operational key recovery. Disabling an account must
 also permanently revoke its sessions, preferably atomically; otherwise enabling
-it again reactivates unexpired sessions. No account-management flow enforces
-this yet. Do not expose these helpers or connect real accounts until all of
+it again reactivates unexpired sessions. An isolated, unexposed `disableUser`
+primitive uses an explicit `manage_users` role permission and a D1 batch to
+disable the user and revoke its sessions and links it created. It is tested in
+SQLite and a local D1 emulator, not real D1. It has no HTTP route or trusted
+authentication, and it does not revoke links created by other users to the
+disabled user’s resources. No account-management flow enforces it yet. Do not expose these helpers or connect real accounts until all of
 those are designed and reviewed.
 
 Workers Web Crypto has an implementation limit on PBKDF2 iterations; see the

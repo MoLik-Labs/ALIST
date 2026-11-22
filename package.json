@@ -18,7 +18,9 @@
     "test:docs-build": "node tests/docs_bilingual_smoke.mjs",
     "test:cf-google-drive": "node tests/cloudflare_google_drive_test.mjs",
     "test:cf-access": "node tests/cloudflare_access_test.mjs",
-    "test:cf-sessions": "node tests/cloudflare_sessions_test.mjs"
+    "test:cf-sessions": "node tests/cloudflare_sessions_test.mjs",
+    "test:cf-users": "node tests/cloudflare_user_management_test.mjs",
+    "test:cf-roles": "node tests/cloudflare_role_management_test.mjs"
   },
   "devDependencies": {
     "happy-dom": "21.0.4",

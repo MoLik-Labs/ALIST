@@ -52,6 +52,12 @@ jobs:
       - name: Test experimental Cloudflare session primitives
         run: npm run test:cf-sessions
 
+      - name: Test experimental Cloudflare user-management primitives
+        run: npm run test:cf-users
+
+      - name: Test experimental Cloudflare role management
+        run: npm run test:cf-roles
+
       - name: Check native platform deployment configuration
         run: |
           python3 tests/platform_config_smoke.py
@@ -108,6 +114,8 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           node ../../tests/cloudflare_access_workerd_test.mjs
           node ../../tests/cloudflare_sessions_workerd_test.mjs
+          node ../../tests/cloudflare_user_management_workerd_test.mjs
+          node ../../tests/cloudflare_role_management_workerd_test.mjs
           npx wrangler deploy --dry-run
           cd ../cloudflare-pages
           ../cloudflare-worker/node_modules/.bin/wrangler pages functions build functions --outdir /tmp/kova-pages-ci --compatibility-date 2026-11-16
