@@ -701,7 +701,9 @@ std::optional<std::string> gzip_compress(std::string_view input, int level) {
     }
     ScopeExit guard([&] { deflateEnd(&zs); });
 
-    zs.next_in = reinterpret_cast<const Bytef*>(input.data());
+    // zlib's public headers may declare next_in mutable unless ZLIB_CONST is
+    // set, although deflate only reads input. The shim declares it const.
+    zs.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(input.data()));
     zs.avail_in = static_cast<uInt>(input.size());
 
     std::string out;
@@ -729,7 +731,8 @@ std::optional<std::string> raw_inflate(std::string_view compressed, size_t max_o
     }
     ScopeExit guard([&] { inflateEnd(&zs); });
 
-    zs.next_in = reinterpret_cast<const Bytef*>(compressed.data());
+    // inflate reads but does not modify the supplied input buffer.
+    zs.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(compressed.data()));
     zs.avail_in = static_cast<uInt>(compressed.size());
 
     std::string out;

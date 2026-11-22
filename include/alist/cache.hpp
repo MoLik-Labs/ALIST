@@ -44,17 +44,17 @@ public:
         std::lock_guard<std::mutex> lk(sh.mu);
         auto it = sh.index.find(key);
         if (it == sh.index.end()) {
-            misses_.fetch_add(1, std::memory_order_relaxed);
+            ++sh.misses;
             return std::nullopt;
         }
         if (it->second->expires_at <= now) {
             sh.lru.erase(it->second);
             sh.index.erase(it);
-            misses_.fetch_add(1, std::memory_order_relaxed);
+            ++sh.misses;
             return std::nullopt;
         }
         sh.lru.splice(sh.lru.begin(), sh.lru, it->second);
-        hits_.fetch_add(1, std::memory_order_relaxed);
+        ++sh.hits;
         return it->second->value;
     }
 
@@ -123,8 +123,22 @@ public:
         return total;
     }
 
-    [[nodiscard]] uint64_t hits() const noexcept { return hits_.load(std::memory_order_relaxed); }
-    [[nodiscard]] uint64_t misses() const noexcept { return misses_.load(std::memory_order_relaxed); }
+    [[nodiscard]] uint64_t hits() const noexcept {
+        uint64_t total = 0;
+        for (const auto& sh : shards_) {
+            std::lock_guard<std::mutex> lk(sh.mu);
+            total += sh.hits;
+        }
+        return total;
+    }
+    [[nodiscard]] uint64_t misses() const noexcept {
+        uint64_t total = 0;
+        for (const auto& sh : shards_) {
+            std::lock_guard<std::mutex> lk(sh.mu);
+            total += sh.misses;
+        }
+        return total;
+    }
 
 private:
     struct Node {
@@ -132,10 +146,12 @@ private:
         V value;
         std::chrono::steady_clock::time_point expires_at;
     };
-    struct Shard {
+    struct alignas(64) Shard {
         mutable std::mutex mu;
         std::list<Node> lru;
         std::unordered_map<std::string, typename std::list<Node>::iterator, TransparentStringHash, std::equal_to<>> index;
+        uint64_t hits = 0;
+        uint64_t misses = 0;
     };
 
     Shard& shard_for(std::string_view key) noexcept {
@@ -145,8 +161,6 @@ private:
 
     std::array<Shard, Shards> shards_;
     size_t max_per_shard_;
-    std::atomic<uint64_t> hits_{0};
-    std::atomic<uint64_t> misses_{0};
 };
 
 // Coalesces concurrent identical requests into a single in-flight execution (prevents cache stampede)

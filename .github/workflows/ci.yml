@@ -1,0 +1,106 @@
+name: Kova CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["BETA", "main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build, Sanitizers, Web UI & Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install isolated Web UI smoke-test dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Test Web UI interactions, public share & Admin Console
+        run: npm run test:webui
+
+      - name: Verify embedded Web UI bundle, CSP hash, i18n & contrast
+        run: node scripts/build_webui.mjs --check
+
+      - name: Test Cloudflare Worker proxy behavior
+        run: npm run test:worker
+
+      - name: Test documentation navigation
+        run: npm run test:docs
+
+      - name: Test Go workspace UI
+        run: npm run test:go-ui
+
+      - name: Verify pinned skill library snapshots
+        run: npm run test:skills
+
+      - name: Set up Go for migration packages
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+          cache: false
+
+      - name: Test Go migration packages and race detector
+        run: |
+          go test ./...
+          go test -race -tags sqlite_fts5 ./...
+          make go-build
+          ./build/alist-go version
+          python3 tests/go_deployment_smoke.py
+
+      - name: Build experimental Go Docker image
+        run: docker build -f Dockerfile.golang -t kova-go-preview:ci .
+
+      - name: Validate Cloudflare Worker bundle with Wrangler
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx wrangler deploy --dry-run
+        working-directory: deploy/cloudflare-worker
+
+      - name: Install native C++20 dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ make cmake libsqlite3-dev libcurl4-openssl-dev libssl-dev zlib1g-dev
+
+      - name: Build hardened LTO release binary & run test suite
+        run: |
+          set +e
+          {
+            make -j2 release &&
+            ls -lh ./alist &&
+            ./alist version &&
+            make -j2 test &&
+            make -j2 go-compat-test &&
+            make -j2 go-db-compat-test
+          } > /tmp/kova-native-ci.log 2>&1
+          status=$?
+          tail -n 80 /tmp/kova-native-ci.log
+          if [ "$status" -ne 0 ]; then
+            while IFS= read -r line; do
+              line=${line//'%'/'%25'}; line=${line//$'\r'/'%0D'}; line=${line//$'\n'/'%0A'}
+              printf '::error::%s\n' "$line"
+            done < <(tail -n 9 /tmp/kova-native-ci.log)
+          fi
+          exit "$status"
+
+      - name: Run AddressSanitizer + LeakSanitizer + UBSan suite
+        run: make -j2 asan
+
+      - name: Run ThreadSanitizer concurrency suite
+        run: make -j2 tsan
+
+      - name: Run performance & memory benchmarks
+        run: make -j2 bench

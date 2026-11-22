@@ -181,6 +181,71 @@ inline std::optional<uint64_t> parse_u64(std::string_view sv) noexcept {
     return val;
 }
 
+// Return true only when gzip has a positive quality value. An explicit gzip
+// quality overrides '*', and malformed/duplicate quality parameters fail closed.
+inline bool accepts_gzip_encoding(std::string_view header) {
+    auto quality_is_positive = [](std::string_view value) noexcept {
+        value = trim_ascii(value);
+        if (value == "0") return false;
+        if (value == "1") return true;
+        if (value.size() < 3 || value[1] != '.' || value.size() > 5) return false;
+        if (value[0] == '0') {
+            for (size_t i = 2; i < value.size(); ++i) {
+                if (value[i] < '0' || value[i] > '9') return false;
+                if (value[i] != '0') return true;
+            }
+            return false;
+        }
+        if (value[0] == '1') {
+            for (size_t i = 2; i < value.size(); ++i) {
+                if (value[i] != '0') return false;
+            }
+            return true;
+        }
+        return false;
+    };
+    struct CodingQuality { bool seen = false; bool valid = true; bool positive = false; };
+    CodingQuality gzip, wildcard;
+    for (auto item : split_sv(header, ',')) {
+        auto semi = item.find(';');
+        auto coding = trim_ascii(item.substr(0, semi));
+        if (coding.empty()) continue;
+        CodingQuality* target = nullptr;
+        if (iequals_ascii(coding, "gzip")) target = &gzip;
+        else if (coding == "*") target = &wildcard;
+        if (!target) continue;
+        if (target->seen) { target->valid = false; continue; }
+        target->seen = true;
+        bool saw_q = false;
+        if (semi == std::string_view::npos) {
+            target->positive = true;
+            continue;
+        }
+        size_t pos = semi + 1;
+        while (pos <= item.size()) {
+            auto next = item.find(';', pos);
+            auto parameter = trim_ascii(next == std::string_view::npos ? item.substr(pos) : item.substr(pos, next - pos));
+            auto equal = parameter.find('=');
+            auto key = trim_ascii(equal == std::string_view::npos ? parameter : parameter.substr(0, equal));
+            if (iequals_ascii(key, "q")) {
+                if (saw_q || equal == std::string_view::npos ||
+                    !quality_is_positive(parameter.substr(equal + 1))) {
+                    target->positive = false;
+                    if (saw_q) target->valid = false;
+                } else {
+                    target->positive = true;
+                }
+                saw_q = true;
+            }
+            if (next == std::string_view::npos) break;
+            pos = next + 1;
+        }
+        if (!saw_q) target->positive = true;
+    }
+    if (gzip.seen) return gzip.valid && gzip.positive;
+    return wildcard.seen && wildcard.valid && wildcard.positive;
+}
+
 inline std::string url_encode(std::string_view sv, bool keep_slash = false) {
     static constexpr const char kHex[] = "0123456789ABCDEF";
     std::string out;

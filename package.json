@@ -1,0 +1,17 @@
+{
+  "name": "kova-native-workspace",
+  "version": "4.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "webui:check": "node scripts/build_webui.mjs --check",
+    "test:webui": "node scripts/build_webui.mjs --check && node tests/webui_smoke.mjs",
+    "test:worker": "node tests/cloudflare_worker_test.mjs",
+    "test:docs": "node tests/docs_smoke.mjs",
+    "test:go-ui": "node tests/go_webui_smoke.mjs",
+    "test:skills": "node tests/skills_integrity.mjs"
+  },
+  "devDependencies": {
+    "happy-dom": "21.0.4"
+  }
+}

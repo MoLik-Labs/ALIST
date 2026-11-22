@@ -9,6 +9,7 @@
 #include "alist/version.hpp"
 #include "alist/vfs.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <csignal>
 #include <cstdio>
@@ -57,7 +58,8 @@ int main(int argc, char** argv) {
         if (arg == "--data" && i + 1 < argc) {
             data_dir = argv[++i];
         } else if (arg == "--port" && i + 1 < argc) {
-            port_override = static_cast<int>(alist::parse_i64(argv[++i]).value_or(5244));
+            auto p = alist::parse_i64(argv[++i]);
+            port_override = p ? static_cast<int>(std::clamp<int64_t>(*p, 1, 65535)) : 5244;
         } else if (arg == "--debug") {
             debug_flag = true;
         } else {

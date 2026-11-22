@@ -28,8 +28,8 @@ public:
     std::string enqueue_offline_download(std::string creator, std::string url, std::string dst_dir_vpath);
 
     std::vector<TaskRecord> list_tasks(std::string_view type_filter, bool done_only) const;
-    bool cancel_task(std::string_view task_id);
-    void clear_done_tasks(std::string_view type_filter);
+    bool cancel_task(std::string_view task_id, std::string_view owner_filter = "");
+    void clear_done_tasks(std::string_view type_filter, std::string_view owner_filter = "");
 
 private:
     struct InternalTask {
@@ -39,7 +39,8 @@ private:
     };
 
     void worker_loop();
-    void clear_done_tasks_unlocked(std::string_view type_filter);
+    size_t count_active_unlocked() const noexcept;
+    void clear_done_tasks_unlocked(std::string_view type_filter, std::string_view owner_filter = "");
 
     VfsEngine& vfs_;
     mutable std::mutex mu_;

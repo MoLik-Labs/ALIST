@@ -1,0 +1,19 @@
+# Experimental Go workspace; requires a dedicated writable directory if uploads
+# are enabled. This does not migrate or serve the native C++ database.
+services:
+  kova-go:
+    build:
+      context: .
+      dockerfile: Dockerfile.golang
+    ports:
+      - "127.0.0.1:5244:5244"
+    environment:
+      KOVA_GO_TOKEN: ${KOVA_GO_TOKEN:?Set a random token of at least 32 bytes}
+      KOVA_GO_ALLOW_WRITE: ${KOVA_GO_ALLOW_WRITE:-false}
+      KOVA_GO_ALLOW_DELETE: ${KOVA_GO_ALLOW_DELETE:-false}
+      KOVA_GO_ALLOW_MOVE: ${KOVA_GO_ALLOW_MOVE:-false}
+      KOVA_GO_ENABLE_WEBDAV: ${KOVA_GO_ENABLE_WEBDAV:-false}
+      KOVA_GO_ENABLE_SHARES: ${KOVA_GO_ENABLE_SHARES:-false}
+    volumes:
+      - ./go-data:/data
+    restart: unless-stopped

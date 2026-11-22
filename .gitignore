@@ -13,6 +13,7 @@
 
 # Runtime data & logs
 /data/
+/go-data/
 *.db
 *.db-shm
 *.db-wal
@@ -24,3 +25,8 @@
 .vscode/
 .idea/
 compile_commands.json
+
+# JavaScript tooling dependencies
+/node_modules/
+/deploy/cloudflare-worker/node_modules/
+/deploy/cloudflare-worker/.dev.vars

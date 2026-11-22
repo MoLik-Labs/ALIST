@@ -1,0 +1,14 @@
+{
+  "name": "kova-cloudflare-edge",
+  "version": "4.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node ../../tests/cloudflare_worker_test.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "4.165.0"
+  }
+}

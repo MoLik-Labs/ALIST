@@ -98,7 +98,7 @@ WebDavServer::WebDavServer(VfsEngine& vfs, BruteForceProtector& bf, TokenBucket&
 std::optional<UserRecord> WebDavServer::authenticate_basic_or_bearer(const HttpRequest& req, HttpResponse& resp) {
     auto challenge = [&]() -> std::optional<UserRecord> {
         resp.status = 401;
-        resp.headers["WWW-Authenticate"] = R"(Basic realm="AList @nggkhaiz WebDAV")";
+        resp.headers["WWW-Authenticate"] = R"(Basic realm="Kova WebDAV")";
         return std::nullopt;
     };
 
@@ -218,9 +218,11 @@ void WebDavServer::handle(HttpRequest& req, HttpResponse& resp) {
         return out;
     };
 
+    std::string meta_pw = req.header("password");
+
     if (req.method == "PROPFIND") {
         std::string depth = req.header("depth", "1");
-        auto self_res = vfs_.get_obj(&user, gvpath, "", req.base_url());
+        auto self_res = vfs_.get_obj(&user, gvpath, meta_pw, req.base_url());
         if (!self_res.ok) {
             resp.status = self_res.http_status;
             return;
@@ -230,7 +232,7 @@ void WebDavServer::handle(HttpRequest& req, HttpResponse& resp) {
         xml += build_prop_response(user_href, self_res.entry);
 
         if (self_res.entry.is_dir && depth != "0") {
-            auto ls = vfs_.list_dir(&user, gvpath, "", false);
+            auto ls = vfs_.list_dir(&user, gvpath, meta_pw, false);
             if (ls.ok) {
                 for (const auto& child : ls.entries) {
                     std::string ch_href = join_vpath(user_href, child.name).value_or(user_href + "/" + child.name);
@@ -248,7 +250,7 @@ void WebDavServer::handle(HttpRequest& req, HttpResponse& resp) {
     if (req.method == "GET" || req.method == "HEAD") {
         int st_code = 200;
         std::string rerr;
-        if (!vfs_.can_read_path(user, gvpath, "", &st_code, &rerr)) {
+        if (!vfs_.can_read_path(user, gvpath, meta_pw, &st_code, &rerr)) {
             resp.status = st_code;
             return;
         }

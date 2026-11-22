@@ -1,114 +1,144 @@
-# AList @nggkhaiz (`v4.1.0-nggkhaiz`)
+# Kova Native Workspace
 
-**AList @nggkhaiz** is an independent, ground-up **C++20** standalone rewrite of AList engineered for minimal binary size, minimal RAM footprint, deterministic zero-GC latency, kernel zero-copy throughput, and defense-in-depth security.
+**Kova** is a self-hosted, AList-compatible file workspace powered by a native C++20 server and an embedded, zero-CDN web app. It keeps the historical `alist` executable, CLI options, API routes, and WebDAV endpoint while delivering the Kova EN/VI workspace UI.
 
----
+- **Version:** `v4.2.0`
+- **Engine:** C++20, with streaming I/O and Linux `sendfile` support
+- **License:** AGPL-3.0 (see [`LICENSE`](LICENSE))
 
-## Performance Snapshot (Host-Specific)
+## What’s included
 
-One recent `make -j2 bench` run in the development sandbox, using the release benchmark target, reported the following. These are reproducibility figures—not guaranteed production throughput, cross-project comparisons, or claims that each latest code change caused the measured values. Results depend on CPU, kernel, compiler, libraries, and load.
+- A responsive file explorer with list/grid layouts, large-list windowing, keyboard navigation, and FTS5 search/command palette.
+- EN/VI language switching, light/dark/system themes, file previews and editing, Markdown rendering, ZIP browsing, and streaming uploads.
+- Public share pages at `/s/:id`, with password and expiration/download-limit options.
+- Account security features including TOTP two-factor authentication and session management.
+- An Admin Console for storage mounts, users, roles/path rules, metadata rules, shares, tasks, system settings, and telemetry.
+- Built-in Local, S3, WebDAV, Google Drive, OneDrive, Dropbox, SFTP, FTP, URLTree, Alias, and Crypt storage drivers.
+- Compatible server surfaces: `/api/*`, `/dav/*`, `/d/*`, `/p/*`, and the existing `alist` CLI.
 
-| Metric | Measured result |
-| :--- | :--- |
-| Stripped standalone binary | 944 KB on this build |
-| Initial process RSS | 7.04 MB |
-| Loaded server RSS | 21.12 MB |
-| 64-shard cache lookups | 8.99 M ops/s |
-| AES-256-GCM encryption | 3,909 MiB/s |
-| HS256 JWT verification | 219,885 verifications/s |
-| SQLite FTS5, 10k files | 9,892 queries/s |
-| HTTP/1.1 keep-alive | 180,378 req/s |
-| `sendfile64()` stream | 8,455.9 MiB/s (70.93 Gbps) |
+The browser UI is embedded in the native binary. Runtime assets are served locally; the application does not need a third-party CDN.
 
-For a fresh measurement on your host, run `make -j2 bench`.
+The standalone documentation website is in [`docs/site`](docs/site/). Serve that directory as static files, for example with `python3 -m http.server 8080 --directory docs/site`. The experimental Go server provides liveness and an optional separate local API with opt-in create-only uploads, but is **not a production replacement**; see [migration status](docs/go-migration.md).
 
----
+## Build and run
 
-## Core Capabilities
+### Requirements
 
-1. **Unified Virtual Filesystem (`VfsEngine`)**
-   - Longest-prefix storage mount resolution, synthesized virtual parent directories, `.balance` round-robin load-balanced mounts, cross-storage zero-RAM streaming copy/move, and thread-local + singleflight re-entrancy cycle guards.
-2. **11 Native High-Performance Storage Drivers**
-   - **Core & Enterprise Protocols**: `Local` (confined zero-copy `sendfile64`), `S3` (AWS S3 / Cloudflare R2 / MinIO / Backblaze B2 / Wasabi / Alibaba OSS with native SigV4 & presigned URLs), `WebDAV` (remote RFC 4918 client), `SFTP` (SSH2), `FTP` / `FTPS`.
-   - **Major Cloud Providers**: `GoogleDrive` (Drive API v3 OAuth2), `OneDrive` (Microsoft Graph v1.0 personal/SharePoint), `Dropbox` (API v2).
-   - **Zero-Overhead Virtual Drivers**: `Crypt` (transparent zero-knowledge **AES-256-GCM** 64 KiB chunked encryption + deterministic SIV `c1_` filename encryption with O(1) HTTP `Range` video seeking), `Alias` (VFS path projection), `URLTree` (virtual hierarchy over remote URLs).
-3. **Full Protocol & API Suite**
-   - **AList-Compatible JSON REST API** (`/api/auth/*`, `/api/me/*`, `/api/public/*`, `/api/fs/*`, `/api/share/*`, `/api/task/*`, `/api/admin/*`).
-   - **RFC 4918 WebDAV Server** (`/dav/*`: `OPTIONS`, `PROPFIND`, `PROPPATCH`, `GET`, `HEAD`, streaming `PUT`, `MKCOL`, `DELETE`, `COPY`, `MOVE`, `LOCK`, `UNLOCK`).
-   - **Signed Direct & Proxy Streaming** (`/d/*`, `/p/*`, `/ad/*` ZIP single-entry extraction) with RFC 7233 `Range` (`206 Partial Content` / `416`), `ETag` (`304`), and token-bucket rate limiting.
-   - **Public Link Sharing** (`/s/:id`, `/sd/:id`, `/sp/:id`) with PBKDF2 passwords, expiration timestamps, and atomic SQLite `max_downloads` quota enforcement.
-   - **Embedded Zero-CDN Single-Page Web UI**: dark/light mode, breadcrumbs, video/audio/image/markdown/code previews, ZIP archive browser, FTS5 search modal, share manager, 2FA setup, and full Admin Console.
-
----
-
-## Security Architecture & Hardening
-
-Every subsystem was designed and verified under **AddressSanitizer (`ASan`)**, **LeakSanitizer (`LSan`)**, **UndefinedBehaviorSanitizer (`UBSan`)**, and **ThreadSanitizer (`TSan`)**:
-
-- **Authentication & Cryptography**:
-  - Passwords hashed with **PBKDF2-HMAC-SHA256** (`210,000` iterations + 16-byte CSPRNG salt).
-  - Strictly pinned **`HS256` JWT** verification (`alg: none` and algorithm confusion rejected) + `pwd_ts` password-change invalidation + persistent SQLite `x_revoked_tokens` (`jti`) logout revocation + active device session eviction (`x_sessions`).
-  - **RFC 6238 TOTP 2FA** with atomic SQLite `last_otp_step` replay protection (blocks reuse of the same 6-digit OTP within its 30-second window).
-  - **At-Rest Cloud Credential Encryption**: all storage `addition` JSON secrets (`secret_access_key`, `refresh_token`, passwords) are encrypted at rest in SQLite via **AES-256-GCM** (`v1:enc:...`) and masked (`********`) in admin list APIs.
-  - **Guest Disabled by Default**; `/d/*` and `/p/*` enforce either constant-time HMAC signature verification or full RBAC + `Meta.Password` + `Meta.Hide` checks.
-- **Filesystem, Archive & Network Defenses**:
-  - **Path & Symlink Confinement**: `clean_vpath` + boundary-safe `is_subpath` (`User.BasePath` jail) + `realpath` / `lstat` / `O_NOFOLLOW` confinement blocking symlink escapes outside mounted local roots.
-  - **Archive Security**: `secure_archive_join` **Zip-Slip** prevention + compression-ratio / total-byte **Zip-Bomb** caps + CRC-32 integrity verification.
-  - **Outbound SSRF & DNS-Rebinding Defense**: blocks loopback, RFC 1918 private networks, link-local cloud metadata (`169.254.169.254`), IPv6 ULA/loopback, and non-HTTP schemes by default, pinning validated DNS answers with `CURLOPT_RESOLVE`.
-  - **HTTP & Parser Hardening**: rejects `Content-Length` + `Transfer-Encoding` request smuggling (`400`), enforces Slowloris socket timeouts, rejects XML `<!DOCTYPE`/`<!ENTITY` (**XXE-proof**), caps JSON nesting depth (`64`), replaces backtracking regexes with guaranteed **O(N·M) linear-time** glob matching (**ReDoS-proof**), and serves active downloads (`.html`, `.svg`, `.js`) with `Content-Security-Policy: default-src 'none'; sandbox`.
-
----
-
-## Quick Start
-
-### 1. Build from Source
-
-Requires a C++20 compiler (`g++ >= 11` or `clang++ >= 14`) and `sqlite3`, `libcurl`, `openssl` (>= 3.0), and `zlib`:
+- Linux (the local filesystem fast path uses Linux APIs)
+- A C++20 compiler (GCC 11+ or Clang 14+), Make, and development libraries for SQLite, libcurl, OpenSSL, and zlib
+- Node.js 22+ for web UI checks and optional Cloudflare Worker tooling; no Node.js is needed at runtime
 
 ```bash
-# Build stripped, LTO-optimized hardened binary (./alist)
+# Build optimized, hardened executable
 make -j"$(nproc)" release
 
-# Run unit, adversarial security, and concurrency suites
-make -j"$(nproc)" test
-make -j"$(nproc)" asan   # AddressSanitizer + LeakSanitizer + UBSan
-make -j"$(nproc)" tsan   # ThreadSanitizer
-
-# Run throughput & memory footprint benchmarks
-make -j"$(nproc)" bench
-```
-
-### 2. CLI Usage
-
-```bash
-# Start server (default: 0.0.0.0:5244, data dir: ./data)
+# Start the server (default: 0.0.0.0:5244, data directory: ./data)
 ./alist server --data ./data --port 5244
 
-# Set or randomize the 'admin' password
-./alist admin set 'YourStrongPassword!' --data ./data
-./alist admin random --data ./data
-
-# List configured storage mounts
-./alist storage list --data ./data
-
-# Show version & engine info
+# Show supported commands and build identity
+./alist --help
 ./alist version
 ```
 
-### 3. Docker & Docker Compose
+On first startup, Kova creates the data directory, database, signing secret, and administrator account. The generated administrator password is written to the server log; set `ALIST_ADMIN_PASSWORD` before first startup to choose it in advance. Once the database exists, change or reset the administrator password with:
+
+```bash
+./alist admin set 'use-a-strong-password' --data ./data
+# Or generate a new random password:
+./alist admin random --data ./data
+```
+
+The data directory contains the SQLite database, generated configuration/signing secret, logs, and temporary downloads. Keep it private and persistent; back it up before upgrades.
+
+### Docker Compose
 
 ```bash
 docker compose up -d --build
 ```
 
-The image defaults to an unprivileged `alist` account (`PUID=10001`, `PGID=10001`). Keep `/opt/alist/data` on persistent storage; it contains the SQLite database, signing key, and configured storage metadata. Compose persists it at `./data`. Set `PUID`/`PGID` to match ownership requirements on the host. Do not publish the service directly to an untrusted network without TLS termination and appropriate access controls.
+Compose publishes port `5244` by default and persists data at `./data`. The image runs as an unprivileged account by default (`PUID=10001`, `PGID=10001`). Set those values to match your host’s data-directory ownership. For a reverse-proxy deployment, terminate TLS at a trusted proxy and enable proxy-header trust only when that proxy is under your control.
 
-### 4. Render
+A Render Blueprint is provided in [`render.yaml`](render.yaml); it configures the `/ping` health check and persistent storage under `/opt/alist/data`. The server honors the platform-provided `PORT` environment variable unless `ALIST_HTTP_PORT` is explicitly set.
 
-Create a Render Blueprint from this repository and select `render.yaml`. It defines the Docker web service, `/ping` health check, and a persistent disk mounted at `/opt/alist/data`. The Blueprint uses Render's `PORT` value (the app binds to it automatically) and a paid plan because persistent disks are not available on free instances. Keep the disk attached: ephemeral instances without it will lose the database and signing key on replacement. Configure `ALIST_SITE_URL` for the public HTTPS URL if absolute links are needed; enable `ALIST_TRUST_PROXY` only when requests arrive through a proxy you control. The source and Compose deployment remain available independently of Render.
+### Heroku Container Stack
 
----
+A Docker-based Heroku configuration is included in [`heroku.yml`](heroku.yml):
 
-## License
+```bash
+heroku create <app-name>
+heroku stack:set container -a <app-name>
+git push heroku HEAD:main
+```
 
-Licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE).
+Heroku supplies `PORT`, which Kova reads automatically. **The standard Heroku dyno filesystem is ephemeral.** Kova stores its SQLite database, signing key, users, and storage configuration in `/opt/alist/data`; this setup is suitable only for demos/testing unless you provide a persistent volume through your hosting arrangement. Do not rely on a standard dyno filesystem for durable production data. For a straightforward persistent deployment, use Render with the included disk or another container host with a writable persistent volume.
+
+For other container platforms, keep `/opt/alist/data` on persistent storage, expose the port the service injects through `PORT` (or configure `ALIST_HTTP_PORT`), and ensure the volume is writable by the configured `PUID`/`PGID`.
+
+### Cloudflare Worker edge proxy
+
+The Worker under [`deploy/cloudflare-worker`](deploy/cloudflare-worker/) is an **edge reverse proxy**, not a standalone Kova server. It requires a separately deployed Kova origin with persistent storage. Set the Worker secret `KOVA_ORIGIN` to that origin's HTTPS URL, then deploy with Wrangler; see the [Worker deployment guide](deploy/cloudflare-worker/README.md). Cloudflare request-size and timeout limits still apply to streamed transfers. Restrict direct origin access where possible, and do not enable `ALIST_TRUST_PROXY` unless callers cannot bypass the trusted proxy.
+
+## Configuration
+
+Settings are stored in `config.json` under the data directory. Environment overrides are applied at startup:
+
+| Variable | Default / behavior |
+| --- | --- |
+| `ALIST_DATA_DIR` | `data`; ignored when `--data` is supplied |
+| `ALIST_ADDR` (`ADDR`) | `0.0.0.0` |
+| `ALIST_HTTP_PORT` (`PORT`) | `5244`; CLI `--port` takes precedence |
+| `ALIST_SITE_URL` | Empty; set the public HTTPS origin when absolute links are needed |
+| `ALIST_ADMIN_PASSWORD` | Random on first initialization; only used if no administrator has been created yet |
+| `ALIST_JWT_SECRET` | Uses the persisted random secret unless a value of at least 32 characters is supplied |
+| `ALIST_TOKEN_EXPIRES_IN` | `48` hours |
+| `ALIST_DEBUG` | `false` |
+| `ALIST_ALLOW_PRIVATE_NET` | `false`; enables outbound access to private/reserved networks when set to true |
+| `ALIST_TRUST_PROXY` | `false`; trust forwarded client-address headers only behind a trusted proxy |
+
+The file-backed configuration also controls upload size, worker counts, connection limits, rate limits, and TLS verification. Treat the data directory and any injected secrets as sensitive.
+
+## Tests and measurements
+
+A single benchmark run in the development sandbox on 2026-11-16 measured the following; these are host-specific reference numbers, not service-level guarantees:
+
+| Metric | Result |
+| --- | ---: |
+| Stripped release executable | 1,169,720 bytes |
+| Initial / loaded process RSS | 6.86 / 20.78 MiB |
+| Sharded cache lookups | 8.97 M ops/s |
+| AES-256-GCM encryption | 4,247.4 MiB/s |
+| HS256 JWT verification | 218,073/s |
+| SQLite FTS5 (10k indexed files) | 10,965 queries/s (91.2 µs/query) |
+| HTTP/1.1 keep-alive | 75,229 req/s (20,000/20,000 verified) |
+| `sendfile64()` stream | 5,833.6 MiB/s (48.94 Gbps) |
+
+These are local native measurements, not a language-to-language comparison. Kova remains C++20 for now: it already has a streaming I/O path and Linux `sendfile` fast path, while a whole-application Go/Rust rewrite would have to reproduce the API, storage drivers, WebDAV behavior, database, and security fixes without a demonstrated end-to-end gain. Revisit a port only if profiling a representative workload identifies a CPU-bound bottleneck and a comparative prototype meets a measurable goal. The Cloudflare Worker is a separate JavaScript edge proxy; it does not require or imply a server-language port.
+
+Re-run on the target machine to compare against its hardware, kernel, compiler, and libraries:
+
+```bash
+# Native API, WebDAV, security, archive, database and concurrency suites
+make -j"$(nproc)" test
+
+# Instrumented native suites
+make -j"$(nproc)" asan   # ASan, LeakSanitizer, UBSan
+make -j"$(nproc)" tsan   # ThreadSanitizer
+
+# Optimized benchmark suite
+make -j"$(nproc)" bench
+
+# Bundle integrity and front-end interaction smoke tests
+node scripts/build_webui.mjs --check
+npm ci --ignore-scripts --no-audit --no-fund
+make webui-test
+npm run test:worker
+(cd deploy/cloudflare-worker && npm ci --ignore-scripts --no-audit --no-fund && npm test && npx wrangler deploy --dry-run)
+```
+
+The front-end smoke test uses a DOM implementation to exercise UI state and interactions; it is not a substitute for running the app in a real browser. Benchmark results are host- and load-dependent; use `make bench` on the target machine instead of treating sample numbers as guarantees.
+
+## Security notes
+
+Security controls include bounded request parsing and streaming, local path/symlink confinement, restricted outbound URL validation with DNS pinning and hop-by-hop redirect checks, credential stripping on cross-origin redirects, task cancellation and queue limits, public-share visibility/quota checks, and ZIP bounds/encryption/ratio checks. Embedded UI delivery uses representation-specific ETags, gzip negotiation, and a strict CSP; CSP generation fails closed if the expected bundle shape changes.
+
+Review [`skills/README.md`](skills/README.md) for the reusable design and testing references saved with this repository.

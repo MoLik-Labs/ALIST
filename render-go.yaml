@@ -1,0 +1,18 @@
+# Experimental Go workspace, separate from the native render.yaml blueprint.
+# /ping is liveness only; it does not imply feature parity or durable storage.
+services:
+  - type: web
+    name: kova-go-preview
+    runtime: docker
+    plan: starter
+    region: singapore
+    healthCheckPath: /ping
+    dockerfilePath: ./Dockerfile.golang
+    dockerContext: .
+    envVars:
+      - key: KOVA_GO_TOKEN
+        sync: false
+    disk:
+      name: kova-go-files
+      mountPath: /data
+      sizeGB: 1
