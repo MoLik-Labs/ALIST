@@ -265,7 +265,9 @@ void WebDavServer::handle(HttpRequest& req, HttpResponse& resp) {
     }
 
     // Mutating WebDAV methods require PermWebdavManage!
-    if (!user.is_admin() && !has_perm(perms, PermWebdavManage)) {
+    // Enforce scoped permissions and metadata password/hide rules for every
+    // mutation, not only reads. WebDAV credentials do not bypass path rules.
+    if (!vfs_.can_write_path(user, gvpath, PermWebdavManage, meta_pw)) {
         resp.status = 403;
         return;
     }
@@ -327,8 +329,7 @@ void WebDavServer::handle(HttpRequest& req, HttpResponse& resp) {
             resp.status = 403;
             return;
         }
-        int32_t dst_perms = vfs_.effective_permissions(user, *dst_global);
-        if (!user.is_admin() && !has_perm(dst_perms, PermWebdavManage)) {
+        if (!vfs_.can_write_path(user, *dst_global, PermWebdavManage, meta_pw)) {
             resp.status = 403;
             return;
         }

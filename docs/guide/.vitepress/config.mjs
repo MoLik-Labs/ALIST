@@ -21,7 +21,7 @@ export default defineConfig({
       label: 'English', lang: 'en-US',
       themeConfig: {
         nav: [{ text: 'Guide', link: '/start' }, ...(repoUrl ? [{ text: 'GitHub', link: repoUrl }] : [])],
-        sidebar: [{ text: 'Get started', items: [{ text: 'Choose a deployment', link: '/start' }, { text: 'Render and containers', link: '/deploy' }, { text: 'Cloudflare', link: '/cloudflare' }, { text: 'Cloudflare preview tutorial', link: '/cloudflare-preview' }, { text: 'Isolated Cloudflare test', link: '/cloudflare-isolated' }, { text: 'Security and recovery', link: '/security' }, { text: 'Publish documentation', link: '/publish-docs' }] }],
+        sidebar: [{ text: 'Get started', items: [{ text: 'Choose a deployment', link: '/start' }, { text: 'Render and containers', link: '/deploy' }, { text: 'Cloudflare', link: '/cloudflare' }, { text: 'Cloudflare preview tutorial', link: '/cloudflare-preview' }, { text: 'Isolated Cloudflare test', link: '/cloudflare-isolated' }, { text: 'Uptime and backups', link: '/monitor-backup' }, { text: 'Security and recovery', link: '/security' }, { text: 'Publish documentation', link: '/publish-docs' }] }],
         outline: { label: 'On this page' },
         docFooter: { prev: 'Previous page', next: 'Next page' },
       },
@@ -30,7 +30,7 @@ export default defineConfig({
       label: 'Tiếng Việt', lang: 'vi-VN',
       themeConfig: {
         nav: [{ text: 'Hướng dẫn', link: '/vi/start' }, ...(repoUrl ? [{ text: 'GitHub', link: repoUrl }] : [])],
-        sidebar: [{ text: 'Bắt đầu', items: [{ text: 'Chọn cách triển khai', link: '/vi/start' }, { text: 'Render và container', link: '/vi/deploy' }, { text: 'Cloudflare', link: '/vi/cloudflare' }, { text: 'Hướng dẫn bản thử nghiệm Cloudflare', link: '/vi/cloudflare-preview' }, { text: 'Triển khai thử nghiệm cô lập', link: '/vi/cloudflare-isolated' }, { text: 'Bảo mật và khôi phục', link: '/vi/security' }, { text: 'Xuất bản tài liệu', link: '/vi/publish-docs' }] }],
+        sidebar: [{ text: 'Bắt đầu', items: [{ text: 'Chọn cách triển khai', link: '/vi/start' }, { text: 'Render và container', link: '/vi/deploy' }, { text: 'Cloudflare', link: '/vi/cloudflare' }, { text: 'Hướng dẫn bản thử nghiệm Cloudflare', link: '/vi/cloudflare-preview' }, { text: 'Triển khai thử nghiệm cô lập', link: '/vi/cloudflare-isolated' }, { text: 'Uptime và sao lưu', link: '/vi/monitor-backup' }, { text: 'Bảo mật và khôi phục', link: '/vi/security' }, { text: 'Xuất bản tài liệu', link: '/vi/publish-docs' }] }],
         outline: { label: 'Trên trang này' },
         docFooter: { prev: 'Trang trước', next: 'Trang tiếp' },
       },

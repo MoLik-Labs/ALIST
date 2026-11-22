@@ -13,7 +13,7 @@
 - Public share pages at `/s/:id`, with password and expiration/download-limit options.
 - Account security features including TOTP two-factor authentication and session management.
 - An Admin Console for storage mounts, users, roles/path rules, metadata rules, shares, tasks, system settings, and telemetry.
-- Built-in Local, S3, WebDAV, Google Drive, OneDrive, Dropbox, SFTP, FTP, URLTree, Alias, and Crypt storage drivers.
+- Built-in Local, S3, WebDAV, Google Drive, OneDrive, Dropbox, SFTP, FTP, URLTree, Alias, and Crypt storage drivers, plus a read-only index of public Catbox links.
 - Compatible server surfaces: `/api/*`, `/dav/*`, `/d/*`, `/p/*`, and the existing `alist` CLI.
 
 The browser UI is embedded in the native binary. Runtime assets are served locally; the application does not need a third-party CDN.
@@ -39,6 +39,10 @@ An isolated [Cloudflare-native R2 reader and opt-in upload prototype](deploy/clo
 requires that origin. Deploying `web` as static files alone cannot provide the
 server or data. See the [platform deployment guide](docs/platform-deployment.md) for Railway,
 Fly.io, Heroku, persistence, backup, scaling and first-start instructions.
+
+## Monitoring and backups
+
+The admin overview offers an on-demand `/ping` check. An **optional separate** experimental Cloudflare Worker can sample one Render service and show a public status page; see the [monitor and backup guide](docs/guide/monitor-backup.md) or [hướng dẫn tiếng Việt](docs/guide/vi/monitor-backup.md). A ping cannot guarantee availability or preserve Render Free's ephemeral files. An optional experimental encrypted metadata backup tool supports local scheduled snapshots and isolated restore, but does not back up mounted files or NodeWarden and cannot make Render Free durable. Real NodeWarden integration is unverified; do not use these as your only backup.
 
 ## Build and run
 

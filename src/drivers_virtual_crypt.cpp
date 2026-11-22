@@ -167,6 +167,75 @@ private:
     bool allow_private_net_ = false;
 };
 
+// A curated, read-only index of public Catbox files. Catbox's documented API
+// does not provide an account file-list endpoint; never pretend this is one.
+class CatboxDriver final : public StorageDriver {
+public:
+    static DriverConfigInfo static_info() {
+        return DriverConfigInfo{
+            .name = "Catbox",
+            .display_name = "Catbox public links (read-only)",
+            .local_sort = true, .no_cache = false, .no_upload = true, .default_proxy = false,
+            .fields = {
+                {"files", "Public Catbox links (path|URL|size)", "text", "", "", true,
+                 "PUBLIC files only: one /path|https://files.catbox.moe/name.ext|size per line. Links are public even when Kova access is restricted. No account listing or upload."},
+            }
+        };
+    }
+    DriverConfigInfo info() const override { return static_info(); }
+    bool init(const StorageRecord& record, VfsEngine* vfs, std::string& err) override {
+        auto j = JsonValue::parse(record.addition);
+        if (!j || !j->is_object() || !j->get("files").is_string()) {
+            err = "Catbox requires a public file manifest"; return false;
+        }
+        const auto text = j->get("files").as_str();
+        if (text.size() > 1024 * 1024) { err = "Catbox manifest exceeds 1 MiB"; return false; }
+        std::map<std::string, bool> paths;
+        std::string manifest;
+        constexpr std::string_view prefix = "https://files.catbox.moe/";
+        for (auto line : split_sv(text, '\n', true)) {
+            line = trim_ascii(line);
+            if (line.empty() || line.front() == '#') continue;
+            const auto cols = split_sv(line, '|', false);
+            if (cols.size() != 3 || paths.size() >= 10000) { err = "Invalid Catbox manifest line or too many entries"; return false; }
+            auto path = trim_ascii(cols[0]);
+            auto url = trim_ascii(cols[1]);
+            auto size_text = trim_ascii(cols[2]);
+            auto clean = clean_vpath(path);
+            auto size = parse_i64(size_text);
+            if (!clean || *clean == "/" || *clean != path || !size || *size < 0 || !url.starts_with(prefix)) {
+                err = "Invalid Catbox path, URL, or size"; return false;
+            }
+            auto file = url.substr(prefix.size());
+            if (file.empty() || file == "." || file == ".." || file.size() > 255 ||
+                !std::all_of(file.begin(), file.end(), [](unsigned char c) {
+                    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                           (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+                })) { err = "Catbox URL must be a direct files.catbox.moe file URL"; return false; }
+            if (!paths.emplace(*clean, true).second) { err = "Duplicate Catbox path"; return false; }
+            manifest.append(*clean).append("|").append(url).append("|").append(size_text).append("\n");
+        }
+        for (const auto& [path, unused] : paths) {
+            (void)unused;
+            auto next = paths.lower_bound(path + "/");
+            if (next != paths.end() && next->first.starts_with(path + "/")) {
+                err = "Catbox file path conflicts with a folder"; return false;
+            }
+        }
+        StorageRecord translated = record;
+        translated.addition = JsonValue::object({{"url_structure", manifest}}).dump();
+        return index_.init(translated, vfs, err);
+    }
+    std::optional<FileObj> stat(std::string_view path, std::string& err) override { return index_.stat(path, err); }
+    bool list(std::string_view path, std::vector<FileObj>& out, std::string& err) override { return index_.list(path, out, err); }
+    std::optional<DownloadResolution> resolve_download(std::string_view path,
+        const std::map<std::string, std::string>& headers, std::string& err) override {
+        return index_.resolve_download(path, headers, err);
+    }
+private:
+    UrlTreeDriver index_;
+};
+
 // ============================================================================
 // 2. Alias Driver (Zero-Overhead VFS Path Remapping / Read-Only Projection)
 // ============================================================================
@@ -593,6 +662,7 @@ std::vector<DriverConfigInfo> get_registered_drivers() {
         sftp_driver_info(),
         ftp_driver_info(),
         UrlTreeDriver::static_info(),
+        CatboxDriver::static_info(),
         AliasDriver::static_info(),
         CryptDriver::static_info(),
     };
@@ -608,6 +678,7 @@ std::unique_ptr<StorageDriver> create_driver_instance(std::string_view name) {
     if (name == "SFTP")        return make_sftp_driver();
     if (name == "FTP")         return make_ftp_driver();
     if (name == "URLTree")     return std::make_unique<UrlTreeDriver>();
+    if (name == "Catbox")      return std::make_unique<CatboxDriver>();
     if (name == "Alias")       return std::make_unique<AliasDriver>();
     if (name == "Crypt")       return std::make_unique<CryptDriver>();
     return nullptr;

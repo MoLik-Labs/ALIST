@@ -47,3 +47,14 @@ compile_commands.json
 /deploy/cloudflare-native/.wrangler/
 /deploy/cloudflare-native/wrangler.isolated.toml
 /.wrangler/
+
+# Local upstream source checkouts, not vendored into this repository
+/.cache/upstream/
+/deploy/uptime-monitor/wrangler.local.toml
+
+# Local Python virtual environment
+/.venv/
+
+# Python interpreter artifacts
+__pycache__/
+*.pyc

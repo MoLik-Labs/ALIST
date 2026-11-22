@@ -1,0 +1,2 @@
+# Required only for the optional standalone encrypted backup tool.
+cryptography==50.0.2

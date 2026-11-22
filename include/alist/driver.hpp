@@ -106,7 +106,7 @@ public:
     }
 };
 
-// Global Registry of all 11 built-in high-performance drivers
+// Global registry of built-in storage drivers
 std::vector<DriverConfigInfo> get_registered_drivers();
 std::unique_ptr<StorageDriver> create_driver_instance(std::string_view driver_name);
 

@@ -37,3 +37,18 @@ Render Free **không có ổ đĩa bền vững**. SQLite, tài khoản, khóa k
 5. Kiểm tra màn hình xác nhận: chỉ gói Free, không disk, không dịch vụ trả phí; không xác nhận nếu yêu cầu phương thức thanh toán mà bạn không muốn cung cấp. Việc Render có yêu cầu xác minh tài khoản/thẻ tùy chính sách của họ, dự án không thể vượt qua yêu cầu đó. Sau deploy, mở URL HTTPS, kiểm tra `/ping`, đăng nhập `admin` và thử với dữ liệu giả. Đây không phải kiểm thử độ bền.
 
 Nếu vẫn muốn Blueprint, tạo **Blueprint mới riêng** và chọn Blueprint Path `deploy/render/render.free-demo.yaml`; nó tạo mật khẩu tự động trong Environment và không tạo disk. Không chuyển Blueprint/Service có dữ liệu đang chạy sang mẫu này: việc thay đổi cấu hình hoặc xóa tài nguyên có thể gây mất dữ liệu. Blueprint gốc `render.yaml` vẫn là gói trả phí có disk; mặc định không dùng cho Free. Chưa xác minh các bước này trên tài khoản Render thực.
+
+## Gắn liên kết Catbox công khai (chỉ đọc)
+
+::: danger Catbox không phải kho riêng tư
+Tệp Catbox là **công khai** với người có URL; đặt quyền hoặc mật khẩu trong Kova không bảo vệ URL gốc. Không dùng cho dữ liệu nhạy cảm. Đây chỉ là danh sách thủ công các liên kết đã có, **không đăng nhập hoặc liệt kê tài khoản**, không tải lên/xóa/đổi tên. Xóa mount không xóa tệp trên Catbox.
+:::
+
+Sau khi phiên bản có driver Catbox đã được merge và deploy, vào **Console → Storages → Add storage**, chọn `Catbox public links (read-only)` và đặt Mount path riêng, ví dụ `/catbox`. Nhập các liên kết **của bạn**, mỗi dòng một tệp theo mẫu (đây chỉ là ví dụ, không phải liên kết thật):
+
+```text
+/anh/vi-du.jpg|https://files.catbox.moe/abc123.jpg|12345
+/tai-lieu.txt|https://files.catbox.moe/def456.txt|2048
+```
+
+Số cuối là kích thước thật theo byte; cung cấp sai có thể ảnh hưởng tải xuống. Chỉ nhận HTTPS trực tiếp tại `files.catbox.moe`, không có query, fragment hoặc đường dẫn con. Thư mục là ảo, cấu hình danh sách trong mount và lưu lại khi thêm/bớt liên kết. Kiểm tra trạng thái mount và mở tệp công khai thử; môi trường kiểm thử chưa kết nối Catbox thật. Catbox có chính sách dung lượng, nội dung và lưu trữ riêng, có thể thay đổi: xem [API](https://catbox.moe/tools.php), [FAQ](https://catbox.moe/faq.php), và [điều khoản](https://catbox.moe/legal.php). Cần storage bền vững cho cấu hình mount; Render Free có thể mất cấu hình khi ngủ hoặc khởi động lại.

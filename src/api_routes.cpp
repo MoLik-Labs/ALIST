@@ -3,6 +3,7 @@
 #include "alist/common.hpp"
 #include "alist/crypto.hpp"
 #include "alist/json.hpp"
+#include "alist/http_client.hpp"
 #include "alist/version.hpp"
 #include "alist/web_ui.hpp"
 
@@ -21,6 +22,25 @@ namespace {
 int bounded_json_int(const JsonValue& value, int fallback, int min_value, int max_value) {
     const int64_t raw = value.as_i64(fallback);
     return static_cast<int>(std::clamp<int64_t>(raw, min_value, max_value));
+}
+
+// The admin status integration accepts only a workers.dev origin, not a URL
+// supplied by an anonymous client. The outbound client additionally validates
+// and pins public DNS, refuses redirects, and never forwards credentials.
+bool valid_monitor_origin(std::string_view origin) {
+    constexpr std::string_view scheme = "https://";
+    constexpr std::string_view suffix = ".workers.dev";
+    if (!origin.starts_with(scheme) || !origin.ends_with(suffix) || origin.size() > 150) return false;
+    auto labels = origin.substr(scheme.size(), origin.size() - scheme.size() - suffix.size());
+    auto dot = labels.find('.');
+    if (dot == std::string_view::npos || labels.find('.', dot + 1) != std::string_view::npos) return false;
+    auto valid_label = [](std::string_view label) {
+        if (label.empty() || label.size() > 63 || label.front() == '-' || label.back() == '-') return false;
+        return std::all_of(label.begin(), label.end(), [](unsigned char c) {
+            return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-';
+        });
+    };
+    return valid_label(labels.substr(0, dot)) && valid_label(labels.substr(dot + 1));
 }
 
 struct ProcTelemetry {
@@ -1274,6 +1294,39 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
             JsonValue arr = JsonValue::array();
             for (const auto& d : get_registered_drivers()) arr.push_back(d.name);
             json_ok(resp, std::move(arr));
+            return;
+        }
+
+        if (req.path == "/api/admin/system/uptime" && req.method == "GET") {
+            const auto origin = req.query_param("origin");
+            if (!valid_monitor_origin(origin)) { json_err(resp, 400, "Invalid monitor origin"); return; }
+            OutboundRequest outgoing;
+            outgoing.url = origin + "/api/status";
+            outgoing.connect_timeout_ms = 3000;
+            outgoing.timeout_ms = 8000;
+            std::string body;
+            outgoing.on_data = [&](const char* data, size_t len) {
+                if (body.size() + len > 4096) return false;
+                body.append(data, len); return true;
+            };
+            auto result = HttpClient::instance().perform(outgoing);
+            auto status = JsonValue::parse(body);
+            if (!result.ok || result.status_code != 200 || !status || !status->is_object()) {
+                json_err(resp, 502, "Monitor unavailable"); return;
+            }
+            auto state = status->get("state").as_str();
+            const auto samples = status->get("samples").as_i64(-1);
+            const auto successful = status->get("successful").as_i64(-1);
+            const auto& checked = status->get("checkedAt");
+            if ((state != "up" && state != "down" && state != "stale" && state != "unknown") ||
+                !status->get("samples").is_int() || !status->get("successful").is_int() ||
+                samples < 0 || samples > 288 || successful < 0 || successful > samples ||
+                !(checked.is_null() || (checked.is_int() && checked.as_i64() >= 0))) {
+                json_err(resp, 502, "Invalid monitor response"); return;
+            }
+            resp.headers["Cache-Control"] = "no-store";
+            json_ok(resp, JsonValue::object({{"state", state}, {"samples", samples},
+                {"successful", successful}, {"checkedAt", checked}}));
             return;
         }
 

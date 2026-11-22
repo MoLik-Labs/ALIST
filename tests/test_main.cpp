@@ -469,6 +469,45 @@ void test_database_vault_and_fts5() {
 // ============================================================================
 // 7. VFS Engine, Crypt Streaming AES-256-GCM Seek & Alias Loop Guard
 // ============================================================================
+void test_catbox_public_manifest_driver() {
+    auto driver = create_driver_instance("Catbox");
+    CHECK(driver != nullptr);
+    CHECK(driver->info().no_upload);
+    StorageRecord record;
+    std::string error;
+    auto set = [&](std::string_view files) {
+        record.addition = JsonValue::object({{"files", std::string(files)}}).dump();
+    };
+    set("/photos/hello.jpg|https://files.catbox.moe/a1b2c3.jpg|42\n/root.txt|https://files.catbox.moe/qwerty.txt|10");
+    CHECK(driver->init(record, nullptr, error));
+    std::vector<FileObj> entries;
+    CHECK(driver->list("/", entries, error));
+    CHECK(entries.size() == 2);
+    CHECK(driver->stat("/photos", error)->is_dir);
+    auto file = driver->stat("/photos/hello.jpg", error);
+    CHECK(file && !file->is_dir && file->size == 42);
+    UploadStream stream;
+    CHECK(!driver->put("/anything", stream, error));
+    CHECK(!driver->remove("/root.txt", error));
+    for (auto bad : {
+        "/a|http://files.catbox.moe/a|1",
+        "/a|https://files.catbox.moe.evil.test/a|1",
+        "/a|https://files.catbox.moe/a?x=1|1",
+        "/a|https://files.catbox.moe/../a|1",
+        "/a|https://files.catbox.moe/a|1\n/a|https://files.catbox.moe/b|2",
+        "/a|https://files.catbox.moe/a|1\n/a-|https://files.catbox.moe/b|1\n/a/b|https://files.catbox.moe/c|1",
+        "/../a|https://files.catbox.moe/a|1",
+        "/a|https://files.catbox.moe/a|-1"
+    }) {
+        set(bad);
+        CHECK(!driver->init(record, nullptr, error));
+    }
+    auto all = get_registered_drivers();
+    CHECK(std::any_of(all.begin(), all.end(), [](const auto& d) { return d.name == "Catbox"; }));
+    CHECK(create_driver_instance("GoogleDrive") != nullptr);
+    CHECK(create_driver_instance("Dropbox") != nullptr);
+}
+
 void test_vfs_crypt_driver_and_loop_guard() {
     std::string dir = "/tmp/alist_vfs_test_" + random_hex(6);
     std::filesystem::create_directories(dir + "/backing/enc_store");
@@ -986,6 +1025,17 @@ void test_live_http_api_webdav_and_concurrency() {
     std::string alice_jwt = JsonValue::parse(al_res.body)->get("data").get("token").as_str();
     CHECK(!alice_jwt.empty());
 
+    // Monitoring relay is admin-only and rejects arbitrary origins before any outbound request.
+    auto uptime_user = raw_http_call(port,
+        "GET /api/admin/system/uptime?origin=https%3A%2F%2Fevil.test HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + alice_jwt + "\r\nConnection: close\r\n\r\n");
+    CHECK(JsonValue::parse(uptime_user.body)->get("code").as_i64() == 403);
+    for (auto bad : {"https://evil.test", "https://localhost", "http://a.b.workers.dev", "https://a.b.workers.dev/abc", "https://a.b.workers.dev@evil.test", "https://a.b.workers.dev.evil.test", "https://a.b.workers.dev:443"}) {
+        auto reply = raw_http_call(port,
+            "GET /api/admin/system/uptime?origin=" + url_encode(bad) + " HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + admin_jwt + "\r\nConnection: close\r\n\r\n");
+        auto parsed = JsonValue::parse(reply.body);
+        CHECK(parsed && parsed->get("code").as_i64() == 400);
+    }
+
     // Verify alice CANNOT access /api/admin/* (Privilege Escalation Blocked!)
     auto alice_admin = raw_http_call(port,
         "GET /api/admin/user/list HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + alice_jwt + "\r\nConnection: close\r\n\r\n");
@@ -1105,6 +1155,75 @@ void test_live_http_api_webdav_and_concurrency() {
         "GET /dav/local/dav_folder/note.txt HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + basic_admin + "\r\nConnection: close\r\n\r\n");
     CHECK(dav_get.status == 200 && dav_get.body == dav_payload);
 
+    // NodeWarden-shaped WebDAV backup flow using dummy data, not a vault.
+    auto dav_repeat = raw_http_call(port,
+        "MKCOL /dav/local/dav_folder HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + basic_admin + "\r\nConnection: close\r\n\r\n");
+    CHECK(dav_repeat.status == 405 || dav_repeat.status == 201);
+    auto dav_nested = raw_http_call(port,
+        "MKCOL /dav/local/dav_folder/attachments HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + basic_admin + "\r\nConnection: close\r\n\r\n");
+    CHECK(dav_nested.status == 201);
+    auto backup_put = raw_http_call(port,
+        "PUT /dav/local/dav_folder/attachments/test.zip HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + basic_admin +
+        "\r\nContent-Type: application/zip\r\nContent-Length: " + std::to_string(dav_payload.size()) + "\r\nConnection: close\r\n\r\n" + dav_payload);
+    CHECK(backup_put.status >= 200 && backup_put.status < 300);
+    auto backup_head = raw_http_call(port,
+        "HEAD /dav/local/dav_folder/attachments/test.zip HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + basic_admin + "\r\nConnection: close\r\n\r\n");
+    CHECK(backup_head.status == 200 && backup_head.body.empty());
+    CHECK(backup_head.headers["content-length"] == std::to_string(dav_payload.size()));
+    auto backup_list = raw_http_call(port,
+        "PROPFIND /dav/local/dav_folder/attachments HTTP/1.1\r\nHost: 127.0.0.1\r\nDepth: 1\r\nAuthorization: " + basic_admin + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+    CHECK(backup_list.status == 207 && backup_list.body.find("test.zip") != std::string::npos);
+    auto backup_get = raw_http_call(port,
+        "GET /dav/local/dav_folder/attachments/test.zip HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + basic_admin + "\r\nConnection: close\r\n\r\n");
+    CHECK(backup_get.status == 200 && backup_get.body == dav_payload);
+    auto backup_delete = raw_http_call(port,
+        "DELETE /dav/local/dav_folder/attachments/test.zip HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + basic_admin + "\r\nConnection: close\r\n\r\n");
+    CHECK(backup_delete.status == 204);
+    auto backup_missing = raw_http_call(port,
+        "HEAD /dav/local/dav_folder/attachments/test.zip HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + basic_admin + "\r\nConnection: close\r\n\r\n");
+    CHECK(backup_missing.status == 404);
+
+    // WebDAV management must not bypass a protected path's metadata password.
+    CHECK(raw_http_call(port, "MKCOL /dav/local/dav_folder/protected HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + basic_admin + "\r\nConnection: close\r\n\r\n").status == 201);
+    RoleRecord dav_role;
+    dav_role.name = "dav-backup-test";
+    dav_role.scopes = {{.path = "/local/dav_folder", .permission = (1 << PermWebdavRead) | (1 << PermWebdavManage)}};
+    auto dav_role_id = db.create_role(dav_role);
+    CHECK(dav_role_id > 0);
+    UserRecord dav_user;
+    dav_user.username = "dav-test";
+    dav_user.password_hash = hash_password_pbkdf2("SecureDavTestPassword!");
+    dav_user.base_path = "/local/dav_folder";
+    dav_user.role_ids = {dav_role_id};
+    CHECK(db.create_user(dav_user) > 0);
+    MetaRecord protected_meta;
+    protected_meta.path = "/local/dav_folder/protected";
+    protected_meta.password = "metadata-secret";
+    protected_meta.p_sub = true;
+    CHECK(db.create_meta(protected_meta) > 0);
+    const auto dav_basic = "Basic " + base64_encode("dav-test:SecureDavTestPassword!");
+    auto protected_put = [&](std::string_view password_header) {
+        return raw_http_call(port, "PUT /dav/protected/item.txt HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + dav_basic +
+            "\r\n" + std::string(password_header) + "Content-Length: 3\r\nConnection: close\r\n\r\nabc");
+    };
+    CHECK(protected_put("").status == 403);
+    CHECK(!std::filesystem::exists(dir + "/storage/dav_folder/protected/item.txt"));
+    auto allowed_protected = protected_put("Password: metadata-secret\r\n");
+    CHECK(allowed_protected.status == 201);
+    auto protected_copy = raw_http_call(port,
+        "COPY /dav/note.txt HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + dav_basic +
+        "\r\nDestination: /dav/protected/other.txt\r\nConnection: close\r\n\r\n");
+    CHECK(protected_copy.status == 403);
+    auto allowed_copy = raw_http_call(port,
+        "COPY /dav/note.txt HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + dav_basic +
+        "\r\nPassword: metadata-secret\r\nDestination: /dav/protected/note.txt\r\nConnection: close\r\n\r\n");
+    CHECK(allowed_copy.status == 201);
+    CHECK(std::filesystem::exists(dir + "/storage/dav_folder/protected/note.txt"));
+    auto protected_delete = raw_http_call(port,
+        "DELETE /dav/protected/item.txt HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + dav_basic + "\r\nConnection: close\r\n\r\n");
+    CHECK(protected_delete.status == 403);
+    CHECK(std::filesystem::exists(dir + "/storage/dav_folder/protected/item.txt"));
+
     // I. Multi-Threaded Concurrency Hammer (12 threads x 25 requests = 300 concurrent ops)
     raw_http_call(port, "POST /api/admin/index/build HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + admin_jwt + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
 
@@ -1160,6 +1279,7 @@ int main() {
     RUN_TEST(test_ssrf_and_antiredos_glob);
     RUN_TEST(test_json_and_xml_bounds);
     RUN_TEST(test_database_vault_and_fts5);
+    RUN_TEST(test_catbox_public_manifest_driver);
     RUN_TEST(test_vfs_crypt_driver_and_loop_guard);
     RUN_TEST(test_zip_archive_security);
     RUN_TEST(test_live_http_api_webdav_and_concurrency);
