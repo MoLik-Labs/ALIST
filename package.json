@@ -17,7 +17,7 @@
     "test:cf-native": "node tests/cloudflare_native_test.mjs",
     "test:docs-build": "node tests/docs_bilingual_smoke.mjs",
     "test:cf-google-drive": "node tests/cloudflare_google_drive_test.mjs",
-    "test:cf-dropbox": "node tests/cloudflare_dropbox_test.mjs",
+    "test:cf-dropbox": "node tests/cloudflare_dropbox_test.mjs && node tests/cloudflare_connected_dropbox_test.mjs",
     "test:cf-access": "node tests/cloudflare_access_test.mjs",
     "test:cf-sessions": "node tests/cloudflare_sessions_test.mjs",
     "test:cf-users": "node tests/cloudflare_user_management_test.mjs",

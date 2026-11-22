@@ -106,12 +106,26 @@ secrets on an isolated test Worker. Anyone possessing the shared Kova token can
 access **all Dropbox content authorized to that Dropbox token**; this is not a
 multi-user security boundary. Never use production credentials or sensitive data.
 
-This uses fixed Dropbox API hosts and never follows redirects. Dropbox access
-tokens expire; refresh/OAuth, per-user isolation, upload, shares, rate limiting,
-UI integration and real-provider testing remain unimplemented. Local tests use
+An additional, separately disabled owner-scoped experiment requires both
+`KOVA_EXPERIMENTAL_V2=enabled` and `KOVA_EXPERIMENTAL_DROPBOX_V2=enabled`,
+D1 migrations through `0007_dropbox_connections.sql`, a valid vault key, and a
+pre-established session. `POST /v2/dropbox/connections` accepts a JSON object
+with only `accessToken`; `GET` lists the authenticated owner's connections;
+`DELETE /v2/dropbox/connections?id=...` deletes the local record. The bearer
+session is required for each request. `GET /v2/dropbox/files?connection=...`
+and `GET /v2/dropbox/file?connection=...&path=...` use that owner's encrypted
+credential only. The cap is 50 connections per owner. Creation and deletion
+atomically check the live session. Deletion does not revoke the Dropbox grant
+or stop an in-flight request. Never send tokens in URLs, logs, issues or chat.
+
+These endpoints use fixed Dropbox API hosts and never follow redirects. Dropbox
+access tokens expire; OAuth/refresh, upload, shares, rate limiting, UI and
+real-provider testing remain unimplemented. v1 is still a shared-token endpoint
+if separately enabled; v2 does not change its security model. Local tests use
 mock responses, not Dropbox. Revoke test credentials after use. Dropbox quotas
-and permissions apply. The existing owner-scoped v2 Google connector does not
-provide owner-scoped Dropbox connections.
+and permissions apply. The operator controlling the Worker and vault key can
+read credentials: encryption is not end-to-end. Do not deploy this experiment
+with production or sensitive data.
 
 ## Access-control foundation (not integrated)
 

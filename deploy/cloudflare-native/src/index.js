@@ -2,6 +2,7 @@
 // API or a production-ready server. Do not attach production data.
 import { googleDriveRequest } from './google-drive.js';
 import { dropboxRequest } from './dropbox.js';
+import { connectedDropboxRequest } from './connected-dropbox.js';
 import { connectedDriveRequest } from './connected-drive.js';
 import { googleOauthRequest } from './google-oauth.js';
 import { googleLoginRequest } from './google-login.js';
@@ -36,6 +37,7 @@ export async function handleRequest(request, env) {
   if (request.method === 'GET' && url.pathname === '/ping') return json(200, { ok: true, experimental: true });
   if (url.pathname.startsWith('/v2/auth/google/')) return googleLoginRequest(request, env);
   if (url.pathname.startsWith('/v2/google-drive/oauth/')) return googleOauthRequest(request, env);
+  if (url.pathname.startsWith('/v2/dropbox/')) return connectedDropboxRequest(request, env);
   if (url.pathname.startsWith('/v2/')) return connectedDriveRequest(request, env);
   if (typeof env?.KOVA_NATIVE_TOKEN !== 'string' || env.KOVA_NATIVE_TOKEN.length < 32 || env.KOVA_NATIVE_TOKEN.length > 1024) {
     return json(503, { error: 'Experimental backend is not configured' });
