@@ -22,3 +22,9 @@ This can happen when `web/index.html` is deployed as static files without its ma
 ::: warning Security boundary
 The origin remains directly reachable unless you restrict it. Leave `ALIST_TRUST_PROXY` disabled unless untrusted clients cannot bypass the proxy. Disable unsafe caching and account for Cloudflare transfer limits. Use isolated credentials and resources for previews; never connect untrusted previews to production data.
 :::
+
+## Workers Builds reports a missing `previews` block
+
+A log showing `Executing user deploy command: npx wrangler preview` and `missing a previews block` is a **Worker preview build failure**, not a Cloudflare Pages error. If previews are not needed, open the Worker → **Settings → Build → Branch control** and disable **Enable Preview Builds**. According to [Cloudflare's guide](https://developers.cloudflare.com/workers/ci-cd/builds/build-branches/), this does not change the production branch. Dashboard labels can differ. Do not replace the preview command with `wrangler deploy`, which could overwrite production.
+
+If previews are needed, first identify the intended Worker and build root directory. Add a `previews` configuration only to the project you intend to deploy, after isolating preview resources and secrets from production. Never attach real data to untrusted previews. `deploy/cloudflare-worker` is a **proxy**; `deploy/cloudflare-native` is still only a prototype. Adding `previews` does not complete the standalone backend. Inspect the next build log: fixing the first error does not guarantee deployment success.
