@@ -80,3 +80,45 @@ export async function dropboxRequest(url, env) {
     return new Response(response.body,{status:200,headers:headersOut});
   } catch { return fail(502,'Dropbox request failed'); }
 }
+
+// Bounded, create-only upload for an authenticated owner. The caller must
+// validate the session and decrypted connection; authorize again after reading
+// the body so revocation during a slow upload prevents the outbound write.
+export async function uploadDropbox(request, url, token, authorize) {
+  const paths=url.searchParams.getAll('path');
+  if (paths.length !== 1 || !pathOK(paths[0]) || !paths[0] || url.searchParams.has('cursor')) return fail(400,'Invalid request');
+  if (typeof authorize !== 'function') return fail(503,'Dropbox unavailable');
+  const lengthText=request.headers.get('content-length');
+  if (!lengthText || !/^(0|[1-9][0-9]{0,7})$/.test(lengthText)) return fail(411,'Valid Content-Length required');
+  const length=Number(lengthText), max=8*1024*1024;
+  if (length>max) return fail(413,'Upload too large');
+  if (!request.body && length!==0) return fail(400,'Invalid body length');
+  try {
+    const chunks=[];let total=0;
+    if (request.body) {
+      const reader=request.body.getReader();
+      try {
+        for (;;) {
+          const {done,value}=await reader.read();if(done)break;
+          total+=value.byteLength;
+          if(total>length || total>max){await reader.cancel().catch(()=>{});return fail(413,'Upload exceeds declared length or limit');}
+          chunks.push(value);
+        }
+      } finally {reader.releaseLock();}
+    }
+    if(total!==length)return fail(400,'Invalid body length');
+    if(!await authorize())return fail(401,'Unauthorized');
+    const bytes=new Uint8Array(total);let offset=0;
+    for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}
+    const response=await fetch('https://content.dropboxapi.com/2/files/upload',{
+      method:'POST',redirect:'manual',signal:AbortSignal.timeout(30000),
+      headers:{authorization:`Bearer ${token}`,'content-type':'application/octet-stream','dropbox-api-arg':asciiJson({path:paths[0],mode:'add',autorename:false,mute:false,strict_conflict:true})},body:bytes,
+    });
+    if(response.status===409)return fail(409,'Dropbox could not create the file');
+    if(response.status===429 || response.status===503)return fail(503,'Dropbox temporarily unavailable');
+    if(response.status!==200)return fail(502,'Dropbox upload failed');
+    const data=await readJson(response);
+    if(!data || !clean(data.name,2000) || !data.name || !pathOK(data.path_display) || !data.path_display || !Number.isSafeInteger(data.size) || data.size!==total)throw Error('Invalid metadata');
+    return json(201,{name:data.name,path:data.path_display,size:data.size});
+  } catch {return fail(502,'Dropbox upload failed');}
+}

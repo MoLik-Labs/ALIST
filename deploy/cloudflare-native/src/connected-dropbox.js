@@ -2,7 +2,7 @@
 // no OAuth refresh, rate limiting, provider revocation or frontend integration.
 import {authenticateSession, hashSessionToken, sessionFromRequest} from './sessions.js';
 import {vaultKey, decode, readSmallJson} from './google-oauth.js';
-import {dropboxRequest} from './dropbox.js';
+import {dropboxRequest, uploadDropbox} from './dropbox.js';
 const enc = new TextEncoder();
 const b64 = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 const idPattern = /^[A-Za-z0-9_-]{22}$/;
@@ -17,7 +17,9 @@ export async function connectedDropboxRequest(request, env) {
   const url = new URL(request.url), connections = url.pathname === '/v2/dropbox/connections';
   const drive = url.pathname === '/v2/dropbox/files' || url.pathname === '/v2/dropbox/file';
   if (!connections && !drive) return fail(404,'Not found');
-  if ((drive && request.method !== 'GET') || (connections && !['GET','POST','DELETE'].includes(request.method))) return fail(405,'Method not allowed');
+  const upload = url.pathname === '/v2/dropbox/file' && request.method === 'PUT';
+  if ((drive && request.method !== 'GET' && !upload) || (connections && !['GET','POST','DELETE'].includes(request.method))) return fail(405,'Method not allowed');
+  if (upload && env.KOVA_EXPERIMENTAL_DROPBOX_WRITES !== 'enabled') return fail(403,'Writes are disabled');
   if (!env.DB || typeof env.KOVA_CREDENTIAL_KEY !== 'string') return fail(503,'Experimental backend is not configured');
   const session = sessionFromRequest(request, env);
   if (!session) return fail(401,'Unauthorized');
@@ -63,6 +65,17 @@ export async function connectedDropboxRequest(request, env) {
     const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:nonce,additionalData:aad(row.id,row.owner_id)},key,decode(row.ciphertext,6000));
     const accessToken=new TextDecoder('utf-8',{fatal:true}).decode(plain);
     if (!validToken(accessToken)) throw Error('Invalid token');
+    if (upload) {
+      // Recheck the session, account and unchanged encrypted connection after
+      // the request body has been read and just before the provider write.
+      const hash=await hashSessionToken(session);
+      const guard=async()=>!!(await env.DB.prepare(`SELECT 1 AS ok FROM dropbox_connections c
+        JOIN users u ON u.id=c.owner_id AND u.disabled=0
+        JOIN sessions s ON s.user_id=u.id AND s.token_hash=? AND s.revoked_at IS NULL AND s.expires_at>?
+        WHERE c.id=? AND c.owner_id=? AND c.nonce=? AND c.ciphertext=? /* upload_guard */`)
+        .bind(hash,now(),row.id,user,row.nonce,row.ciphertext).first());
+      return await uploadDropbox(request,url,accessToken,guard);
+    }
     const target=new URL(url); target.pathname=url.pathname.replace('/v2/','/v1/'); target.searchParams.delete('connection');
     return await dropboxRequest(target,{KOVA_EXPERIMENTAL_DROPBOX:'enabled',DROPBOX_ACCESS_TOKEN:accessToken});
   } catch { return fail(503,'Experimental backend unavailable'); }

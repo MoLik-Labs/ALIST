@@ -15,6 +15,11 @@ const key = '${key}'; let nonce;
 const encode = x => btoa(JSON.stringify(x)).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');
 globalThis.fetch = async (url, options) => {
  if (String(url)==='https://api.dropboxapi.com/2/files/list_folder') return Response.json({entries:[{'.tag':'file',name:'Ảnh',path_display:'/Ảnh',size:2}],cursor:'next',has_more:false});
+ if (String(url)==='https://content.dropboxapi.com/2/files/upload') {
+  const arg=JSON.parse(options.headers['dropbox-api-arg']);
+  if (arg.path!=='/new.txt' || arg.mode!=='add' || arg.autorename!==false || arg.strict_conflict!==true || new TextDecoder().decode(options.body)!=='abc') throw Error('invalid upload');
+  return Response.json({name:'new.txt',path_display:'/new.txt',size:3});
+ }
  if (String(url)==='https://content.dropboxapi.com/2/files/download') {
   if (JSON.parse(options.headers['dropbox-api-arg']).path !== '/Ảnh') throw Error('invalid Dropbox path');
   return new Response('ok');
@@ -41,7 +46,7 @@ globalThis.fetch = async (url, options) => {
  return Response.json({id_token:h+'.'+p+'.'+sig});
 };
 export default {async fetch(req,env){
- const config={DB:env.DB,KOVA_CREDENTIAL_KEY:key,KOVA_EXPERIMENTAL_V2:'enabled',KOVA_EXPERIMENTAL_LOGIN:'enabled',GOOGLE_CLIENT_ID:'client',GOOGLE_CLIENT_SECRET:'secret',KOVA_LOGIN_REDIRECT:'https://worker.test/v2/auth/google/callback',KOVA_EXPERIMENTAL_DROPBOX:'enabled',KOVA_EXPERIMENTAL_DROPBOX_V2:'enabled',DROPBOX_ACCESS_TOKEN:'test-token',KOVA_NATIVE_TOKEN:'test-only-native-token-at-least-32-characters'};
+ const config={DB:env.DB,KOVA_CREDENTIAL_KEY:key,KOVA_EXPERIMENTAL_V2:'enabled',KOVA_EXPERIMENTAL_LOGIN:'enabled',GOOGLE_CLIENT_ID:'client',GOOGLE_CLIENT_SECRET:'secret',KOVA_LOGIN_REDIRECT:'https://worker.test/v2/auth/google/callback',KOVA_EXPERIMENTAL_DROPBOX:'enabled',KOVA_EXPERIMENTAL_DROPBOX_V2:'enabled',KOVA_EXPERIMENTAL_DROPBOX_WRITES:'enabled',DROPBOX_ACCESS_TOKEN:'test-token',KOVA_NATIVE_TOKEN:'test-only-native-token-at-least-32-characters'};
  const dropHeaders={authorization:'Bearer '+config.KOVA_NATIVE_TOKEN};
  const dropList=await handleRequest(new Request('https://worker.test/v1/dropbox/files',{headers:dropHeaders}),config);
  const dropFile=await handleRequest(new Request('https://worker.test/v1/dropbox/file?path='+encodeURIComponent('/Ảnh'),{headers:dropHeaders}),config);
@@ -55,8 +60,10 @@ export default {async fetch(req,env){
  const dropId=(await createdDropbox.json()).id;
  const connectedList=await handleRequest(new Request('https://worker.test/v2/dropbox/files?connection='+dropId,{headers:userHeaders}),config);
  const connectedDrop=await connectedList.json();
+ const uploaded=await handleRequest(new Request('https://worker.test/v2/dropbox/file?connection='+dropId+'&path=%2Fnew.txt',{method:'PUT',headers:{authorization:'Bearer '+data.token,'content-length':'3'},body:'abc'}),config);
+ const uploadedData=await uploaded.json();
  const removedDropbox=await handleRequest(new Request('https://worker.test/v2/dropbox/connections?id='+dropId,{method:'DELETE',headers:userHeaders}),config);
- const dropV2={created:createdDropbox.status,entries:connectedDrop.entries,removed:removedDropbox.status};
+ const dropV2={created:createdDropbox.status,entries:connectedDrop.entries,upload:uploaded.status,uploadedData,removed:removedDropbox.status};
  const me=await handleRequest(new Request('https://worker.test/v2/me',{headers:{authorization:'Bearer '+data.token}}),config);
  const connection=await createGoogleConnection(env.DB,key,'alice',{clientId:'client',clientSecret:'secret',refreshToken:'synthetic-refresh'});
  const connections=await handleRequest(new Request('https://worker.test/v2/connections',{headers:{authorization:'Bearer '+data.token}}),config);
@@ -95,6 +102,6 @@ try {
  }
  await db.batch([db.prepare("INSERT INTO users(id,username) VALUES('alice','alice')"),db.prepare("INSERT INTO external_identities VALUES('google','google-subject','alice')")]);
  const response=await mf.dispatchFetch('http://localhost/test'); assert.equal(response.status,200);
- assert.deepEqual(await response.json(),{dropbox:{listing:{entries:[{type:'file',name:'Ảnh',path:'/Ảnh',size:2}],nextCursor:null},status:200,body:'ok'},dropV2:{created:201,entries:[{type:'file',name:'Ảnh',path:'/Ảnh',size:2}],removed:200},browser:{finish:303,location:'/',me:200,logout:200,after:401},start:200,finish:200,me:{id:'alice'},connections:200,connectionListed:true,drive:200,listing:{files:[{id:'f',name:'My file',mimeType:'text/plain'}],nextPageToken:null},rangeResult:{status:206,range:'bytes 2-4/6',body:'cde'},exportResult:{status:200,body:'pdf'},disconnect:200,disconnected:{ok:true,providerRevoked:false},driveAfter:404,logout:200,after:401,replay:400});
+ assert.deepEqual(await response.json(),{dropbox:{listing:{entries:[{type:'file',name:'Ảnh',path:'/Ảnh',size:2}],nextCursor:null},status:200,body:'ok'},dropV2:{created:201,entries:[{type:'file',name:'Ảnh',path:'/Ảnh',size:2}],upload:201,uploadedData:{name:'new.txt',path:'/new.txt',size:3},removed:200},browser:{finish:303,location:'/',me:200,logout:200,after:401},start:200,finish:200,me:{id:'alice'},connections:200,connectionListed:true,drive:200,listing:{files:[{id:'f',name:'My file',mimeType:'text/plain'}],nextPageToken:null},rangeResult:{status:206,range:'bytes 2-4/6',body:'cde'},exportResult:{status:200,body:'pdf'},disconnect:200,disconnected:{ok:true,providerRevoked:false},driveAfter:404,logout:200,after:401,replay:400});
  console.log('Experimental Google login workerd and D1 emulator tests passed');
 } finally {await mf.dispose();}

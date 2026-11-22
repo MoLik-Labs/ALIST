@@ -135,9 +135,23 @@ credential only. The cap is 50 connections per owner. Creation and deletion
 atomically check the live session. Deletion does not revoke the Dropbox grant
 or stop an in-flight request. Never send tokens in URLs, logs, issues or chat.
 
+A further disabled-by-default write experiment requires
+`KOVA_EXPERIMENTAL_DROPBOX_WRITES=enabled` in addition to the v2 flags.
+`PUT /v2/dropbox/file?connection=...&path=/folder/new-file` sends a raw body
+with a valid `Content-Length`, at most 8 MiB. It uses Dropbox `mode=add`,
+`autorename=false` and `strict_conflict=true`; a conflict returns 409 rather
+than silently replacing a file. The token needs Dropbox's `files.content.write`
+scope. The server counts bytes independently, checks the owner's session and
+connection again after receiving the body, and streams no client-controlled
+host or headers to Dropbox. A provider request already in flight cannot be
+rolled back on revocation or disconnect. A timeout or invalid provider response
+can occur **after Dropbox created the file**; check the folder before retrying.
+The write uses a shared folder's existing Dropbox permissions and does not
+implement Kova public/private sharing.
+
 These endpoints use fixed Dropbox API hosts and never follow redirects. Dropbox
-access tokens expire; OAuth/refresh, upload, shares, rate limiting, UI and
-real-provider testing remain unimplemented. v1 is still a shared-token endpoint
+access tokens expire; OAuth/refresh, larger uploads, shares, rate limiting,
+UI upload and real-provider testing remain unimplemented. v1 is still a shared-token endpoint
 if separately enabled; v2 does not change its security model. Local tests use
 mock responses, not Dropbox. Revoke test credentials after use. Dropbox quotas
 and permissions apply. The operator controlling the Worker and vault key can
