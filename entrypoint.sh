@@ -12,6 +12,10 @@ case "$UMASK" in
     ''|*[!0-7]*) echo "UMASK must contain octal digits only" >&2; exit 64 ;;
 esac
 
+if [ "${KOVA_DISPOSABLE_DEMO:-}" = "true" ]; then
+    echo "WARNING: Disposable demo: local accounts, settings, signing keys and files can be lost on restart, spin-down or redeploy. Do not use real data." >&2
+fi
+
 umask "$UMASK"
 # Container platforms may supply the image command as the first argument.
 if [ "${1:-}" = "server" ]; then

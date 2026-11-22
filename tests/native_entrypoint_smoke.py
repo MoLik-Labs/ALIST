@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory(prefix='kova-entrypoint-test-') as tmp:
     script = tmp / 'entrypoint.sh'
     script.write_text((root / 'entrypoint.sh').read_text().replace('/opt/alist/alist', str(fake)))
     env = os.environ.copy()
-    for key in ('ALIST_DATA_DIR', 'DYNO', 'PUID', 'PGID', 'UMASK', 'TMPDIR'):
+    for key in ('ALIST_DATA_DIR', 'DYNO', 'PUID', 'PGID', 'UMASK', 'TMPDIR', 'KOVA_DISPOSABLE_DEMO'):
         env.pop(key, None)
     env.update(PUID='10001', PGID='10001', TMPDIR=str(tmp))
     data = tmp / 'data with spaces'
@@ -25,6 +25,8 @@ with tempfile.TemporaryDirectory(prefix='kova-entrypoint-test-') as tmp:
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == ['ARG:server', 'ARG:--data', f'ARG:{data}', 'ARG:--port', 'ARG:1234']
     assert data.is_dir()
+    result = subprocess.run(['sh', str(script), 'server'], env={**env, 'ALIST_DATA_DIR': str(data), 'KOVA_DISPOSABLE_DEMO': 'true'}, text=True, capture_output=True)
+    assert result.returncode == 0 and 'Disposable demo' in result.stderr and 'lost' in result.stderr
     # A Heroku-like arbitrary UID must never attempt useradd or chown; the
     # fallback is private, and the warning cannot be mistaken for persistence.
     result = subprocess.run(['sh', str(script), 'server'], env={**env, 'DYNO': 'web.1'}, text=True, capture_output=True)

@@ -1,0 +1,16 @@
+# Disposable demo only: Render Free cannot attach a persistent disk.
+# Never sync this Blueprint over an existing service with valuable data.
+services:
+  - type: web
+    name: kova-free-demo
+    runtime: docker
+    plan: free
+    autoDeployTrigger: 'off'
+    healthCheckPath: /ping
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: ALIST_ADMIN_PASSWORD
+        generateValue: true
+      - key: KOVA_DISPOSABLE_DEMO
+        value: "true"

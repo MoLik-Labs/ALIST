@@ -78,7 +78,7 @@ docker compose up -d --build
 
 Compose publishes port `5244` by default and persists data at `./data`. The image runs as an unprivileged account by default (`PUID=10001`, `PGID=10001`). Set those values to match your host’s data-directory ownership. For a reverse-proxy deployment, terminate TLS at a trusted proxy and enable proxy-header trust only when that proxy is under your control.
 
-A Render Blueprint is provided in [`render.yaml`](render.yaml); it configures the `/ping` health check and persistent storage under `/opt/alist/data`. The server honors the platform-provided `PORT` environment variable unless `ALIST_HTTP_PORT` is explicitly set.
+The root [`render.yaml`](render.yaml) uses a **paid** plan and persistent disk. For a free, disposable test from your own public repository without a Blueprint, see the [Render guide (English)](docs/guide/deploy.md#render-free-disposable-test-without-a-blueprint) or [hướng dẫn tiếng Việt](docs/guide/vi/deploy.md). Render Free has no persistent disk: accounts, keys and configuration can be lost at any restart or spin-down; do not use real data. The optional separate [`deploy/render/render.free-demo.yaml`](deploy/render/render.free-demo.yaml) is also disposable and must not be synced over an existing service. The server honors `PORT` unless `ALIST_HTTP_PORT` is explicitly set.
 
 ### Heroku Container Stack
 
