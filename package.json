@@ -23,7 +23,9 @@
     "test:cf-roles": "node tests/cloudflare_role_management_test.mjs",
     "test:cf-vault": "node tests/cloudflare_credential_vault_test.mjs",
     "test:cf-connected-drive": "node tests/cloudflare_connected_drive_test.mjs",
-    "test:cf-google-oauth": "node tests/cloudflare_google_oauth_test.mjs"
+    "test:cf-google-oauth": "node tests/cloudflare_google_oauth_test.mjs",
+    "test:cf-identity": "node tests/cloudflare_google_identity_test.mjs",
+    "test:cf-login": "node tests/cloudflare_google_login_test.mjs"
   },
   "devDependencies": {
     "happy-dom": "21.0.4",

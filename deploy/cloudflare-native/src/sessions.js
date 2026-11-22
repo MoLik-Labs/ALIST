@@ -14,13 +14,17 @@ function makeToken() {
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-export async function issueSession(db, verifiedUserId, expiresAt, now = nowSeconds()) {
+export async function issueSession(db, verifiedUserId, expiresAt, now = nowSeconds(), requiredIdentity = null) {
   if (!validId(verifiedUserId) || !validTime(now) || !validTime(expiresAt) || expiresAt <= now || expiresAt - now > MAX_SESSION_SECONDS) return null;
+  if (requiredIdentity !== null && (requiredIdentity?.provider !== 'google' || typeof requiredIdentity.subject !== 'string' || !/^[\x21-\x7e]{1,255}$/.test(requiredIdentity.subject))) return null;
   const token = makeToken();
   const digest = await hashToken(token);
+  const guard = requiredIdentity === null ? '' : ` AND EXISTS (
+    SELECT 1 FROM external_identities WHERE provider = ? AND subject = ? AND user_id = users.id)`;
+  const values = [digest, now, expiresAt, verifiedUserId];
+  if (requiredIdentity !== null) values.push(requiredIdentity.provider, requiredIdentity.subject);
   const result = await db.prepare(`INSERT INTO sessions (token_hash, user_id, created_at, expires_at)
-    SELECT ?, id, ?, ? FROM users WHERE id = ? AND disabled = 0`)
-    .bind(digest, now, expiresAt, verifiedUserId).run();
+    SELECT ?, id, ?, ? FROM users WHERE id = ? AND disabled = 0${guard}`).bind(...values).run();
   return result.meta?.changes === 1 ? token : null;
 }
 

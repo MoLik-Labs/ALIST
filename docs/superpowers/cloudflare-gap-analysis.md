@@ -32,8 +32,8 @@ The native router has dozens of `/api/` routes for authentication, users,
 roles, storage administration, filesystem operations, shares, tasks and public
 settings, plus WebDAV. `web/app.js` calls these routes directly. The experimental
 Worker exposes `/v1/...` endpoints using one shared bearer token and disabled-by-default `/v2/...` experiments using preseeded sessions and owner-scoped credentials. It is not
-compatible with the Kova UI/API and has no multi-user login or account
-management. Its Google credential belongs to one Worker configuration; anyone
+compatible with the Kova UI/API and has no production-ready multi-user login or account
+management. A disabled pre-provisioned Google login experiment has only local/mock tests. Its Google credential belongs to one Worker configuration; anyone
 with its bearer token can read that account's permitted files. It must not be
 used with sensitive data or as a multi-user security boundary.
 

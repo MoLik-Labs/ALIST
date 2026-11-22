@@ -17,14 +17,14 @@ const json = (status, payload) => new Response(JSON.stringify(payload), { status
 const fail = (status, message) => json(status, { error: message });
 const validSecret = x => typeof x === 'string' && x.length > 0 && x.length <= 4096 && !/[\x00-\x20\x7f]/.test(x);
 const nowSeconds = () => Math.floor(Date.now() / 1000);
-function decode(value, max) {
+export function decode(value, max) {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]+$/.test(value) || value.length > max) throw Error('Invalid data');
   const input = value.replace(/-/g, '+').replace(/_/g, '/');
   const bytes = Uint8Array.from(atob(input + '='.repeat((4 - input.length % 4) % 4)), c => c.charCodeAt(0));
   if (b64(bytes) !== value) throw Error('Invalid data');
   return bytes;
 }
-async function vaultKey(value) {
+export async function vaultKey(value) {
   const raw = decode(value, 43);
   if (raw.length !== 32) throw Error('Invalid key');
   return crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']);
@@ -38,7 +38,7 @@ function redirectUri(raw) {
   } catch { return null; }
 }
 const aad = (stateHash, userId, sessionHash) => enc.encode(JSON.stringify([1, 'google-oauth', stateHash, userId, sessionHash]));
-async function readSmallJson(response) {
+export async function readSmallJson(response) {
   if (!response.body) throw Error('Missing body');
   const reader = response.body.getReader();
   const parts = []; let total = 0;

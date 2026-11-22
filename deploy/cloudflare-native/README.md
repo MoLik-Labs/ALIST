@@ -10,7 +10,7 @@ To experiment, create a separate Worker project and isolated R2 bucket; bind the
 bucket as `R2` and set `KOVA_NATIVE_TOKEN` to a unique random secret of at least
 32 characters through Cloudflare's runtime secret settings. Use HTTPS. Do not
 bind production data. There is deliberately no one-click button: the prototype
-has no user registration or login, Kova-compatible D1 metadata, large/multipart uploads, deletion, permission scopes, rate
+has no user registration or production-ready login, Kova-compatible D1 metadata, large/multipart uploads, deletion, permission scopes, rate
 limiting, session revocation, WebDAV, legacy API compatibility, backup workflow,
 or real-provider/browser testing. Possession of the single token grants read
 access to the **entire bucket**, including create access if writes are enabled. Do not expose this on a public service or use
@@ -110,9 +110,9 @@ boundary until integrated and reviewed end to end.
 primitives: 256-bit random tokens, token hashes in D1, fixed expiry (at most
 24 hours), account-disabled checks and revocation. Tests use SQLite and the
 local workerd/D1 emulator; they do not verify production D1. The opt-in `/v2`
-experiment can validate and revoke sessions but provides no way to issue them
-through HTTP. `issueSession` must only be called after a trusted authentication
-flow verifies identity. There is no password authentication, login UI, reset,
+experiment validates and revokes sessions; the separately disabled Google
+login prototype can issue sessions for pre-provisioned identities. `issueSession`
+must only be called after a trusted authentication flow verifies identity. There is no password authentication, login UI, reset,
 2FA, CSRF policy, session cookie handling, brute-force protection, multi-user
 provider authorization or operational key recovery. Disabling an account must
 also permanently revoke its sessions, preferably atomically; otherwise enabling
@@ -142,8 +142,8 @@ workerd/D1 emulation. They do not constitute a security review or test real D1.
 
 An isolated `/v2/google-drive/` experiment uses this vault and session
 primitives for owner-only listing and downloads; it is disabled unless
-`KOVA_EXPERIMENTAL_V2=enabled`. It has no login or provisioning flow and is not
-integrated into the Kova UI. The older `/v1` prototype still uses one
+`KOVA_EXPERIMENTAL_V2=enabled`. It has no production-ready login or
+connection provisioning and is not integrated into the Kova UI. The older `/v1` prototype still uses one
 account-level bearer secret and must not be treated as multi-user.
 Key provisioning, key versioning/rotation, safe backup/recovery, audit, OAuth
 consent/revocation, deletion semantics at Google and grant-based sharing are not
@@ -163,8 +163,8 @@ allowed; a user ID from the request is never trusted. The route refreshes the
 owner's Google token and uses the same limited read-only connector. It is tested
 with mock Google responses and local workerd/D1 emulation only.
 
-**Do not enable or deploy for users:** there is no trusted login, session
-issuance, consent UI, connection management/revocation, D1 migration
+**Do not enable or deploy for users:** there is no production-ready login,
+account provisioning, consent UI, connection management/revocation, D1 migration
 deployment, durable throttling or UI, and no real provider test. It does not implement
 roles, resource sharing or Kova API compatibility. The test harness seeds users,
 sessions and connections directly and is not part of the Worker. The v1 shared
@@ -178,7 +178,7 @@ Google Drive read-only scope using PKCE, a random single-use state, an encrypted
 short-lived verifier and a live initiating session. It stores the refresh token
 in the experimental owner-scoped vault. OAuth requires both experimental flags
 and a configured fixed HTTPS callback URI; the actual application has no login
-or connection UI. Issuance of sessions is not exposed. The flow has mock and
+or connection UI. The separate login prototype is disabled by default. The flow has mock and
 local D1/workerd tests only and has not been verified with Google or deployed
 Cloudflare resources. **Do not enable it for users or sensitive data.**
 
@@ -191,3 +191,24 @@ fails, a provider authorization can remain active; revoke it in Google account
 settings. The read-only scope, Google verification rules and account testing
 restrictions may require additional approval. No secret should be printed or
 shared in chat, logs or Git.
+
+
+## Google sign-in experiment (disabled)
+
+The disabled-by-default `/v2/auth/google/start` and callback experiment uses
+Google OIDC, PKCE, a single-use D1 state, a Secure HttpOnly SameSite=Lax
+browser-binding cookie, and RS256 verification using Google's fixed JWKS
+endpoint. It validates issuer, audience, nonce and token times. Only Google
+subjects pre-provisioned in `external_identities` map to enabled users; email
+is not an identifier. On success it returns a one-hour bearer session as JSON.
+The workerd test uses synthetic users, generated signing keys and mock Google
+responses; no Google account, Cloudflare deployment or browser was tested.
+
+This is not ready for users: no onboarding/provisioning UI, browser login UI,
+durable rate limiting, account recovery, audit, session security policy, consent
+handling or real provider validation exists. Anyone can fill the prototype's
+global pending-attempt cap, causing denial of service. Removing an identity does
+not automatically revoke already-issued sessions. Redirect query logging and
+session-token handling require review. Provisioning and privilege assignment
+must not be exposed until end-to-end authentication and authorization are
+reviewed. Keep all experimental flags disabled; use no sensitive accounts.
