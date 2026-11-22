@@ -33,7 +33,7 @@ creates a paid persistent disk and generates an initial admin password; review
 the plan and costs before confirming and retrieve the password from Render
 service environment settings. These links target the upstream repository, not
 your fork; for a fork select your repository in the provider dashboard.
-An isolated [Cloudflare-native R2 reader prototype](deploy/cloudflare-native/README.md) is not a complete backend and must not be used for production. A separate [Cloudflare Pages proxy](deploy/cloudflare-pages/README.md) also
+An isolated [Cloudflare-native R2 reader and opt-in upload prototype](deploy/cloudflare-native/README.md) is not a complete backend and must not be used for production. A separate [Cloudflare Pages proxy](deploy/cloudflare-pages/README.md) also
 requires that origin. Deploying `web` as static files alone cannot provide the
 server or data. See the [platform deployment guide](docs/platform-deployment.md) for Railway,
 Fly.io, Heroku, persistence, backup, scaling and first-start instructions.

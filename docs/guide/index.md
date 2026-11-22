@@ -21,5 +21,5 @@ features:
 ---
 
 ::: warning Current implementation
-The complete Kova server currently runs in a native Linux container. The Cloudflare Worker and Pages projects are **proxies**, not standalone backends. An experimental Cloudflare-native R2 reader exists, but is not a complete backend or production-ready. The Go implementation is experimental.
+The complete Kova server currently runs in a native Linux container. The Cloudflare Worker and Pages projects are **proxies**, not standalone backends. An experimental Cloudflare-native R2 reader with optional small uploads exists, but is not a complete backend or production-ready. The Go implementation is experimental.
 :::

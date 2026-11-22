@@ -21,5 +21,5 @@ features:
 ---
 
 ::: warning Tình trạng hiện tại
-Server Kova đầy đủ hiện chạy trong container Linux native. Worker và Pages của Cloudflare mới là **proxy**, chưa phải backend độc lập. Đã có bộ đọc R2 Cloudflare-native thử nghiệm, nhưng chưa phải backend hoàn chỉnh hoặc sẵn sàng production; bản Go cũng đang thử nghiệm.
+Server Kova đầy đủ hiện chạy trong container Linux native. Worker và Pages của Cloudflare mới là **proxy**, chưa phải backend độc lập. Đã có bộ đọc R2 Cloudflare-native thử nghiệm và tùy chọn tải tệp nhỏ, nhưng chưa phải backend hoàn chỉnh hoặc sẵn sàng production; bản Go cũng đang thử nghiệm.
 :::

@@ -1,5 +1,6 @@
-// Experimental standalone Cloudflare-native R2 reader. This is NOT the Kova
+// Experimental standalone Cloudflare-native R2 API. This is NOT the Kova
 // API or a production-ready server. Do not attach production data.
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 const json = (status, payload) => new Response(JSON.stringify(payload), {
   status,
   headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' },
@@ -31,8 +32,45 @@ export async function handleRequest(request, env) {
     return json(503, { error: 'Experimental backend is not configured' });
   }
   if (!await authorized(request, env.KOVA_NATIVE_TOKEN)) return json(401, { error: 'Unauthorized' });
-  if (request.method !== 'GET') return json(405, { error: 'Method not allowed' });
+  if (request.method !== 'GET' && request.method !== 'PUT') return json(405, { error: 'Method not allowed' });
   try {
+    if (request.method === 'PUT') {
+      if (url.pathname !== '/v1/object') return json(404, { error: 'Not found' });
+      if (env.KOVA_NATIVE_WRITES !== 'enabled') return json(403, { error: 'Writes are disabled' });
+      const key = url.searchParams.get('key');
+      if (!key || !safeText(key, 1024) || new TextEncoder().encode(key).length > 1024) return json(400, { error: 'Invalid request' });
+      // Content-Length is required, but independently count bytes: a client can lie.
+      const lengthText = request.headers.get('content-length');
+      if (!lengthText || !/^(0|[1-9][0-9]{0,7})$/.test(lengthText)) return json(411, { error: 'Valid Content-Length required' });
+      const length = Number(lengthText);
+      if (length > MAX_UPLOAD_BYTES) return json(413, { error: 'Upload too large' });
+      if (!request.body && length !== 0) return json(400, { error: 'Invalid body length' });
+      const chunks = [];
+      let total = 0;
+      if (request.body) {
+        const reader = request.body.getReader();
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            total += value.byteLength;
+            if (total > length || total > MAX_UPLOAD_BYTES) {
+              await reader.cancel().catch(() => {});
+              return json(413, { error: 'Upload exceeds declared length or limit' });
+            }
+            chunks.push(value);
+          }
+        } finally { reader.releaseLock(); }
+      }
+      if (total !== length) return json(400, { error: 'Invalid body length' });
+      const bytes = new Uint8Array(total);
+      let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+      // Header-form conditional follows HTTP If-None-Match: * semantics.
+      const result = await env.R2.put(key, bytes, { onlyIf: new Headers({ 'If-None-Match': '*' }) });
+      if (!result) return json(409, { error: 'Object already exists' });
+      return json(201, { key, size: total });
+    }
     if (url.pathname === '/v1/objects') {
       const prefix = url.searchParams.get('prefix') || '';
       const cursor = url.searchParams.get('cursor') || '';
