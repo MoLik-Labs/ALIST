@@ -92,7 +92,7 @@ jobs:
             while IFS= read -r line; do
               line=${line//'%'/'%25'}; line=${line//$'\r'/'%0D'}; line=${line//$'\n'/'%0A'}
               printf '::error::%s\n' "$line"
-            done < <(tail -n 40 /tmp/kova-native-ci.log)
+            done < <(tail -n 9 /tmp/kova-native-ci.log)
           fi
           exit "$status"
 
