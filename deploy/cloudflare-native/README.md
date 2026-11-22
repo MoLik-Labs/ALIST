@@ -31,9 +31,12 @@ verification.
 A separate interface lives in `ui/` and is served only when an `ASSETS` binding
 is present. It is not the native Kova frontend and is not a complete Kova
 replacement. It can use experimental session, Google Drive and Dropbox v2 APIs,
-but sign-in currently requires manually entering the callback's session token.
-Tokens are retained in tab memory only; the browser never stores them in URLs
-or local storage. UI downloads are limited to 8 MiB. The local Wrangler config
+with optional browser sign-in via `KOVA_EXPERIMENTAL_BROWSER_AUTH=enabled`.
+This returns an HttpOnly, Secure, SameSite=Lax session cookie and redirects to
+the UI after login; the cookie is not accessible to JavaScript. Mutating
+cookie-authenticated requests require a same-origin Origin. Without that flag,
+the legacy experimental callback returns a bearer token for manual testing;
+manual tokens stay in tab memory, not URLs or local storage. UI downloads are limited to 8 MiB. The local Wrangler config
 binds assets for visual preview but has no D1 or login configuration; sign-in
 will not work there. The [English](../../docs/guide/cloudflare-preview.md) and
 [Tiếng Việt](../../docs/guide/vi/cloudflare-preview.md) tutorials cover its
@@ -173,7 +176,7 @@ local workerd/D1 emulator; they do not verify production D1. The opt-in `/v2`
 experiment validates and revokes sessions; the separately disabled Google
 login prototype can issue sessions for pre-provisioned identities. `issueSession`
 must only be called after a trusted authentication flow verifies identity. There is no password authentication, production-ready login UI, reset,
-2FA, CSRF policy, session cookie handling, brute-force protection, multi-user
+2FA, comprehensive CSRF/security review, brute-force protection, multi-user
 provider authorization or operational key recovery. Disabling an account must
 also permanently revoke its sessions, preferably atomically; otherwise enabling
 it again reactivates unexpired sessions. An isolated, unexposed `disableUser`
@@ -263,7 +266,11 @@ Google OIDC, PKCE, a single-use D1 state, a Secure HttpOnly SameSite=Lax
 browser-binding cookie, and RS256 verification using Google's fixed JWKS
 endpoint. It validates issuer, audience, nonce and token times. Only Google
 subjects pre-provisioned in `external_identities` map to enabled users; email
-is not an identifier. On success it returns a one-hour bearer session as JSON.
+is not an identifier. By default it returns a one-hour bearer session as JSON.
+When `KOVA_EXPERIMENTAL_BROWSER_AUTH=enabled`, it instead sets a one-hour
+HttpOnly, Secure, SameSite=Lax host-only session cookie and redirects to `/`;
+state-changing requests using this cookie require a matching HTTPS Origin.
+Sign-out revokes the session and clears the cookie. This is still experimental.
 The workerd test uses synthetic users, generated signing keys and mock Google
 responses; no Google account, Cloudflare deployment or browser was tested.
 

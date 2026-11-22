@@ -21,6 +21,15 @@ try {
   assert.equal((await handleRequest(make(alice,'/v2/dropbox/connections'),{...env,KOVA_EXPERIMENTAL_DROPBOX_V2:undefined})).status,404);
   assert.equal((await handleRequest(make('bad','/v2/dropbox/connections'),env)).status,401);
   assert.equal((await handleRequest(make(alice,'/v2/dropbox/connections','POST',{accessToken:'bad\nvalue'}),env)).status,400);
+  const cookieEnv={...env,KOVA_EXPERIMENTAL_BROWSER_AUTH:'enabled'};
+  const cookie=`__Host-kova_session=${alice}`;
+  const cookiePost=origin=>new Request('https://worker.test/v2/dropbox/connections',{method:'POST',headers:{cookie,origin,'content-type':'application/json'},body:JSON.stringify({accessToken:'temporary'})});
+  assert.equal((await handleRequest(cookiePost('https://evil.test'),cookieEnv)).status,401);
+  let cookieResult=await handleRequest(cookiePost('https://worker.test'),cookieEnv);
+  assert.equal(cookieResult.status,201);
+  const cookieId=(await cookieResult.json()).id;
+  cookieResult=await handleRequest(new Request(`https://worker.test/v2/dropbox/connections?id=${cookieId}`,{method:'DELETE',headers:{cookie,origin:'https://worker.test'}}),cookieEnv);
+  assert.equal(cookieResult.status,200);
   const racing=await issueSession(db,'alice',Math.floor(Date.now()/1000)+600), hash=await hashSessionToken(racing);
   beforeWrite=()=>sqlite.prepare('UPDATE sessions SET revoked_at=? WHERE token_hash=?').run(Math.floor(Date.now()/1000),hash);
   assert.equal((await handleRequest(make(racing,'/v2/dropbox/connections','POST',{accessToken:'secret'}),env)).status,409);

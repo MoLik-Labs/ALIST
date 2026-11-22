@@ -72,7 +72,18 @@ export default {async fetch(req,env){
  const driveAfter=await handleRequest(new Request('https://worker.test/v2/google-drive/files?connection='+connection,{headers:{authorization:'Bearer '+data.token}}),config);
  const logout=await handleRequest(new Request('https://worker.test/v2/logout',{method:'POST',headers:{authorization:'Bearer '+data.token}}),config);
  const after=await handleRequest(new Request('https://worker.test/v2/me',{headers:{authorization:'Bearer '+data.token}}),config);
- return Response.json({dropbox,dropV2,start:start.status,finish:finish.status,me:await me.json(),connections:connections.status,connectionListed:listData.connections.length === 1 && listData.connections[0].id === connection && listData.connections[0].provider === 'google_drive',drive:drive.status,listing,rangeResult,exportResult,disconnect:disconnect.status,disconnected,driveAfter:driveAfter.status,logout:logout.status,after:after.status,replay:(await handleRequest(callback(),config)).status});
+ const replay=(await handleRequest(callback(),config)).status;
+ const browserConfig={...config,KOVA_EXPERIMENTAL_BROWSER_AUTH:'enabled'};
+ const browserStart=await handleRequest(new Request('https://worker.test/v2/auth/google/start',{method:'POST',headers:{origin:'https://worker.test','content-type':'application/json'}}),browserConfig);
+ const browserBinding=browserStart.headers.get('set-cookie').split(';')[0], browserAuth=new URL((await browserStart.json()).authorizationUrl);nonce=browserAuth.searchParams.get('nonce');
+ const browserFinish=await handleRequest(new Request('https://worker.test/v2/auth/google/callback?code=code&state='+browserAuth.searchParams.get('state'),{headers:{cookie:browserBinding}}),browserConfig);
+ const cookies=browserFinish.headers.getSetCookie();
+ const sessionCookie=cookies.find(x=>x.startsWith('__Host-kova_session=')).split(';')[0];
+ const browserMe=await handleRequest(new Request('https://worker.test/v2/me',{headers:{cookie:sessionCookie}}),browserConfig);
+ const browserLogout=await handleRequest(new Request('https://worker.test/v2/logout',{method:'POST',headers:{cookie:sessionCookie,origin:'https://worker.test'}}),browserConfig);
+ const browserAfter=await handleRequest(new Request('https://worker.test/v2/me',{headers:{cookie:sessionCookie}}),browserConfig);
+ const browser={finish:browserFinish.status,location:browserFinish.headers.get('location'),me:browserMe.status,logout:browserLogout.status,after:browserAfter.status};
+ return Response.json({dropbox,dropV2,browser,start:start.status,finish:finish.status,me:await me.json(),connections:connections.status,connectionListed:listData.connections.length === 1 && listData.connections[0].id === connection && listData.connections[0].provider === 'google_drive',drive:drive.status,listing,rangeResult,exportResult,disconnect:disconnect.status,disconnected,driveAfter:driveAfter.status,logout:logout.status,after:after.status,replay});
 }};`;
 modules.unshift({type:'ESModule',path:`${process.cwd()}/entry.js`,contents:harness});
 const mf=new Miniflare(convertV4MiniflareOptions({modules,compatibilityDate:'2026-11-16',d1Databases:['DB']}));
@@ -84,6 +95,6 @@ try {
  }
  await db.batch([db.prepare("INSERT INTO users(id,username) VALUES('alice','alice')"),db.prepare("INSERT INTO external_identities VALUES('google','google-subject','alice')")]);
  const response=await mf.dispatchFetch('http://localhost/test'); assert.equal(response.status,200);
- assert.deepEqual(await response.json(),{dropbox:{listing:{entries:[{type:'file',name:'Ảnh',path:'/Ảnh',size:2}],nextCursor:null},status:200,body:'ok'},dropV2:{created:201,entries:[{type:'file',name:'Ảnh',path:'/Ảnh',size:2}],removed:200},start:200,finish:200,me:{id:'alice'},connections:200,connectionListed:true,drive:200,listing:{files:[{id:'f',name:'My file',mimeType:'text/plain'}],nextPageToken:null},rangeResult:{status:206,range:'bytes 2-4/6',body:'cde'},exportResult:{status:200,body:'pdf'},disconnect:200,disconnected:{ok:true,providerRevoked:false},driveAfter:404,logout:200,after:401,replay:400});
+ assert.deepEqual(await response.json(),{dropbox:{listing:{entries:[{type:'file',name:'Ảnh',path:'/Ảnh',size:2}],nextCursor:null},status:200,body:'ok'},dropV2:{created:201,entries:[{type:'file',name:'Ảnh',path:'/Ảnh',size:2}],removed:200},browser:{finish:303,location:'/',me:200,logout:200,after:401},start:200,finish:200,me:{id:'alice'},connections:200,connectionListed:true,drive:200,listing:{files:[{id:'f',name:'My file',mimeType:'text/plain'}],nextPageToken:null},rangeResult:{status:206,range:'bytes 2-4/6',body:'cde'},exportResult:{status:200,body:'pdf'},disconnect:200,disconnected:{ok:true,providerRevoked:false},driveAfter:404,logout:200,after:401,replay:400});
  console.log('Experimental Google login workerd and D1 emulator tests passed');
 } finally {await mf.dispose();}

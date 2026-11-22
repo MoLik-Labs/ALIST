@@ -1,6 +1,6 @@
 // Unexposed-by-default end-to-end experiment, not a Kova-compatible API.
 // Session login remains experimental and requires pre-provisioned identities.
-import { authenticateSession, revokeSession, hashSessionToken } from './sessions.js';
+import { authenticateSession, revokeSession, hashSessionToken, sessionFromRequest, browserSessionCookie } from './sessions.js';
 import { readGoogleConnection, deleteGoogleConnection } from './credential-vault.js';
 import { googleDriveRequest } from './google-drive.js';
 
@@ -9,7 +9,6 @@ const json = (status, data) => new Response(JSON.stringify(data), { status, head
 } });
 const fail = (status, message) => json(status, { error: message });
 const connectionId = /^[A-Za-z0-9_-]{22}$/;
-const sessionHeader = /^Bearer ([A-Za-z0-9_-]{43})$/;
 
 export async function connectedDriveRequest(request, env) {
   if (env?.KOVA_EXPERIMENTAL_V2 !== 'enabled') return fail(404, 'Not found');
@@ -21,7 +20,7 @@ export async function connectedDriveRequest(request, env) {
   if (!drive && !me && !logout && !connections) return fail(404, 'Not found');
   if ((logout && request.method !== 'POST') || (!logout && request.method !== 'GET' && !(connections && request.method === 'DELETE'))) return fail(405, 'Method not allowed');
   if (!env.DB || (drive && typeof env.KOVA_CREDENTIAL_KEY !== 'string')) return fail(503, 'Experimental backend is not configured');
-  const token = sessionHeader.exec(request.headers.get('authorization') || '')?.[1];
+  const token = sessionFromRequest(request, env);
   if (!token) return fail(401, 'Unauthorized');
   const connection = drive ? url.searchParams.get('connection') : null;
   if (drive && (url.searchParams.getAll('connection').length !== 1 || !connection || !connectionId.test(connection))) return fail(400, 'Invalid request');
@@ -52,7 +51,10 @@ export async function connectedDriveRequest(request, env) {
     if (logout) {
       // Do not accept a user ID or another session token in the request body.
       const revoked = await revokeSession(env.DB, token);
-      return revoked ? json(200, { ok: true }) : fail(401, 'Unauthorized');
+      if (!revoked) return fail(401, 'Unauthorized');
+      const response = json(200, { ok: true });
+      if (env.KOVA_EXPERIMENTAL_BROWSER_AUTH === 'enabled') response.headers.append('set-cookie', browserSessionCookie('', 0));
+      return response;
     }
     // The vault verifies enabled ownership in D1; do not allow a client to
     // choose userId or provide provider credentials in the request.

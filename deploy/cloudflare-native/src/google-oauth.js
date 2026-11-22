@@ -1,6 +1,6 @@
 // Experimental Google Drive OAuth connection flow. Disabled by default; not a
 // login system or production-ready OAuth implementation. No HTML/JS is served.
-import { authenticateSession } from './sessions.js';
+import { authenticateSession, sessionFromRequest } from './sessions.js';
 import { createGoogleConnection } from './credential-vault.js';
 const authUrl = 'https://accounts.google.com/o/oauth2/v2/auth';
 const tokenUrl = 'https://oauth2.googleapis.com/token';
@@ -69,11 +69,11 @@ export async function googleOauthRequest(request, env) {
     const key = await vaultKey(env.KOVA_CREDENTIAL_KEY);
     const now = nowSeconds();
     if (start) {
-      const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(request.headers.get('authorization') || '');
-      if (!match) return fail(401, 'Unauthorized');
-      const userId = await authenticateSession(env.DB, match[1], now);
+      const session = sessionFromRequest(request, env);
+      if (!session) return fail(401, 'Unauthorized');
+      const userId = await authenticateSession(env.DB, session, now);
       if (!userId) return fail(401, 'Unauthorized');
-      const sessionHash = hex(await sha(match[1]));
+      const sessionHash = hex(await sha(session));
       const state = rand(), verifier = rand(), stateHash = hex(await sha(state));
       const nonce = crypto.getRandomValues(new Uint8Array(12));
       const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce, additionalData: aad(stateHash, userId, sessionHash) }, key, enc.encode(verifier)));

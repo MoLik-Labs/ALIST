@@ -6,7 +6,7 @@ const html=await readFile(new URL('index.html',root),'utf8'), script=await readF
 const window=new Window({url:'https://worker.test/'});window.document.write(html);
 const id='ABCDEFGHIJKLMNOPQRSTUV', session='A'.repeat(43), calls=[];
 window.fetch=async (path,options={})=>{calls.push({path:String(path),authorization:options.headers?.get('authorization')});
-  if(path==='/v2/me')return Response.json({id:'alice'});
+  if(path==='/v2/me')return options.headers?.get('authorization') ? Response.json({id:'alice'}) : new Response(null,{status:401});
   if(path==='/v2/connections')return Response.json({connections:[{id,provider:'google_drive'}],nextCursor:null});
   if(path==='/v2/dropbox/connections')return Response.json({connections:[]});
   if(String(path).startsWith('/v2/google-drive/files'))return Response.json({files:[{id:'folder',name:'<img src=x onerror=alert(1)>',mimeType:'application/vnd.google-apps.folder'}],nextPageToken:null});
@@ -21,11 +21,27 @@ doc.getElementById('session').value=session;doc.getElementById('sessionForm').di
 await new Promise(resolve=>setTimeout(resolve,80));
 assert.equal(doc.getElementById('workspace').hidden,false);assert.equal(doc.getElementById('session').value,'');
 assert.equal(doc.getElementById('userName').textContent,'alice');
-assert.ok(!window.localStorage.getItem('token'));assert.equal(calls[0].authorization,'Bearer '+session);
+assert.ok(!window.localStorage.getItem('token'));assert.ok(calls.some(call=>call.path==='/v2/me' && call.authorization==='Bearer '+session));
 doc.querySelector('.connection').click();await new Promise(resolve=>setTimeout(resolve,80));
 assert.equal(doc.querySelector('.file-name span:last-child').textContent,'<img src=x onerror=alert(1)>');
 assert.equal(doc.querySelector('.file-list img'),null);
 assert.match(calls.at(-1).path,/parent=root/);
 doc.getElementById('logout').click();await new Promise(resolve=>setTimeout(resolve,80));
 assert.equal(doc.getElementById('workspace').hidden,true);assert.equal(doc.getElementById('session').value,'');
-await window.happyDOM.abort();console.log('Experimental Cloudflare UI interaction smoke tests passed');
+await window.happyDOM.abort();
+const cookieWindow=new Window({url:'https://worker.test/'});cookieWindow.document.write(html);
+cookieWindow.fetch=async(path,options={})=>{
+  assert.equal(options.credentials,'same-origin');assert.equal(options.headers?.get('authorization'),null);
+  if(path==='/v2/me')return Response.json({id:'cookie-user'});
+  if(path==='/v2/connections')return Response.json({connections:[],nextCursor:null});
+  if(path==='/v2/dropbox/connections')return Response.json({connections:[]});
+  if(path==='/v2/logout')return new Response(null,{status:503});
+  throw Error('unexpected '+path);
+};
+cookieWindow.eval(script);await new Promise(resolve=>setTimeout(resolve,80));
+assert.equal(cookieWindow.document.getElementById('workspace').hidden,false);
+assert.equal(cookieWindow.document.getElementById('userName').textContent,'cookie-user');
+cookieWindow.document.getElementById('logout').click();await new Promise(resolve=>setTimeout(resolve,80));
+assert.equal(cookieWindow.document.getElementById('workspace').hidden,false,'failed logout must not report success');
+assert.equal(cookieWindow.document.getElementById('message').className,'error');
+await cookieWindow.happyDOM.abort();console.log('Experimental Cloudflare UI interaction smoke tests passed');

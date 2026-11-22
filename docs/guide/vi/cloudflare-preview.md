@@ -18,7 +18,7 @@ Mở `http://127.0.0.1:8787/` trên **chính máy chạy Wrangler**. Đây là c
 
 ## 2. Các thao tác trong bản thử nghiệm
 
-Khi backend thử nghiệm được cấu hình riêng và có tài khoản đã cấp trước, nút đăng nhập Google mở luồng thử nghiệm. Callback hiện trả JSON chứa session token: người thử phải quay lại trang và nhập token thủ công. Token chỉ nằm trong bộ nhớ tab, không lưu sau khi tải lại. **Không gửi token vào chat, URL, log hoặc ảnh chụp màn hình.** Đây là quy trình tạm, chưa phù hợp người dùng thật.
+Khi backend thử nghiệm được cấu hình riêng và có tài khoản đã cấp trước, nút đăng nhập Google mở luồng thử nghiệm. Bật `KOVA_EXPERIMENTAL_BROWSER_AUTH=enabled` cùng các flag đăng nhập thử nghiệm: sau callback, trình duyệt quay về giao diện với cookie phiên Secure, HttpOnly. Nhập bearer token thủ công vẫn dành cho thử nghiệm; nếu không bật flag này, callback trả bearer token dạng JSON. **Không gửi token vào chat, URL, log hoặc ảnh chụp màn hình.** Đăng nhập này chưa phù hợp người dùng thật.
 
 Sau đăng nhập, chọn kết nối để duyệt thư mục; nút **Xem thêm** lấy trang tiếp theo. Có thể thử thêm Dropbox bằng access token ngắn hạn của tài khoản thử nghiệm. Nút kết nối Google Drive mở cửa sổ riêng; sau khi callback hoàn tất, trở lại trang và bấm **Làm mới**. Xóa kết nối chỉ xóa thông tin tại Kova, không tự thu hồi quyền ở Google/Dropbox; hãy thu hồi riêng trong tài khoản nhà cung cấp. Tải tệp qua giao diện thử nghiệm giới hạn 8 MiB; tệp Google Workspace được yêu cầu xuất PDF và có thể không được hỗ trợ cho mọi loại tài liệu.
 
@@ -26,4 +26,4 @@ Sau đăng nhập, chọn kết nối để duyệt thư mục; nút **Xem thêm
 
 Để thử nhiều người dùng cần Worker riêng, D1 riêng với migrations, vault key riêng và cấu hình OAuth cùng định danh được cấp trước. Xem [README Cloudflare-native](https://github.com/MoLik-Labs/Kova-INC/blob/CLOUDFLARE/deploy/cloudflare-native/README.md) về bindings, biến, giới hạn và rủi ro. Không trỏ cấu hình thử nghiệm vào Worker hoặc dữ liệu production. Chỉ bật các flag thử nghiệm trong môi trường cô lập; v1 dùng token chung có quyền trên toàn bộ dữ liệu nhà cung cấp và không phải bảo mật đa người dùng.
 
-Trước khi dùng thật vẫn cần hoàn thiện đăng nhập không sao chép token, bảo vệ chống lạm dụng, phục hồi khóa, phân quyền/chia sẻ, các driver, kiểm thử trình duyệt và kiểm thử tài nguyên thực tế. Nếu giao diện không tải CSS/JS, kiểm tra `GET /`, `/app.css`, `/app.js`, binding `ASSETS`, cấu hình build và CSP; không đăng tải toàn bộ repository.
+Trước khi dùng thật vẫn cần hoàn thiện và rà soát bảo mật đăng nhập, bảo vệ chống lạm dụng, phục hồi khóa, phân quyền/chia sẻ, các driver, kiểm thử trình duyệt và kiểm thử tài nguyên thực tế. Nếu giao diện không tải CSS/JS, kiểm tra `GET /`, `/app.css`, `/app.js`, binding `ASSETS`, cấu hình build và CSP; không đăng tải toàn bộ repository.

@@ -1,6 +1,6 @@
 // Experimental, disabled-by-default Google OIDC login. No production rollout.
 // Account identities must be provisioned separately; no public signup.
-import { issueSession } from './sessions.js';
+import { issueSession, browserSessionCookie } from './sessions.js';
 import { verifyGoogleIdentityToken } from './google-identity.js';
 import { vaultKey, decode, readSmallJson } from './google-oauth.js';
 const enc = new TextEncoder();
@@ -83,6 +83,12 @@ export async function googleLoginRequest(request, env) {
     const issuedAt = nowSeconds();
     const session = await issueSession(env.DB,row.id,issuedAt+3600,issuedAt,{provider:'google',subject});
     if (!session) return fail(403,'Account is not authorized');
+    if (env.KOVA_EXPERIMENTAL_BROWSER_AUTH === 'enabled') {
+      const headers = new Headers({'location':'/','cache-control':'no-store','referrer-policy':'no-referrer','content-security-policy':"default-src 'none'; frame-ancestors 'none'",'x-content-type-options':'nosniff'});
+      headers.append('set-cookie', secureCookie('',0));
+      headers.append('set-cookie', browserSessionCookie(session,3600));
+      return new Response(null,{status:303,headers});
+    }
     return json(200,{token:session},secureCookie('',0));
   } catch { return fail(503,'Experimental login unavailable'); }
 }

@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {sessionFromRequest, browserSessionCookie} from '../deploy/cloudflare-native/src/sessions.js';
+const token='A'.repeat(43), env={KOVA_EXPERIMENTAL_BROWSER_AUTH:'enabled'};
+const req=(method='GET',headers={},url='https://worker.test/v2/me')=>new Request(url,{method,headers});
+const cookie=`__Host-kova_session=${token}`;
+assert.equal(sessionFromRequest(req('GET',{cookie}),env),token);
+assert.equal(sessionFromRequest(req('GET',{cookie}),{}),null);
+assert.equal(sessionFromRequest(req('GET',{cookie},'http://worker.test/v2/me'),env),null);
+assert.equal(sessionFromRequest(req('GET',{cookie:cookie+'; '+cookie}),env),null);
+assert.equal(sessionFromRequest(req('GET',{cookie,authorization:'bad'}),env),null);
+assert.equal(sessionFromRequest(req('POST',{cookie}),env),null);
+assert.equal(sessionFromRequest(req('POST',{cookie,origin:'https://evil.test'}),env),null);
+assert.equal(sessionFromRequest(req('POST',{cookie,origin:'null'}),env),null);
+assert.equal(sessionFromRequest(req('POST',{cookie,origin:'https://worker.test'}),env),token);
+assert.equal(sessionFromRequest(req('DELETE',{authorization:'Bearer '+token}),{}),token);
+assert.match(browserSessionCookie(token,3600),/^__Host-kova_session=A{43}; Path=\/; Max-Age=3600; Secure; HttpOnly; SameSite=Lax$/);
+assert.match(browserSessionCookie('',0),/Max-Age=0/);
+console.log('Experimental browser session security tests passed');

@@ -1,12 +1,11 @@
 // Isolated, opt-in Dropbox access-token connections. Not production-ready:
 // no OAuth refresh, rate limiting, provider revocation or frontend integration.
-import {authenticateSession, hashSessionToken} from './sessions.js';
+import {authenticateSession, hashSessionToken, sessionFromRequest} from './sessions.js';
 import {vaultKey, decode, readSmallJson} from './google-oauth.js';
 import {dropboxRequest} from './dropbox.js';
 const enc = new TextEncoder();
 const b64 = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 const idPattern = /^[A-Za-z0-9_-]{22}$/;
-const bearer = /^Bearer ([A-Za-z0-9_-]{43})$/;
 const validToken = v => typeof v === 'string' && v.length > 0 && v.length <= 4096 && /^[\x21-\x7e]+$/.test(v);
 const aad = (id, user) => enc.encode(JSON.stringify([1,'dropbox',id,user]));
 const now = () => Math.floor(Date.now()/1000);
@@ -20,7 +19,7 @@ export async function connectedDropboxRequest(request, env) {
   if (!connections && !drive) return fail(404,'Not found');
   if ((drive && request.method !== 'GET') || (connections && !['GET','POST','DELETE'].includes(request.method))) return fail(405,'Method not allowed');
   if (!env.DB || typeof env.KOVA_CREDENTIAL_KEY !== 'string') return fail(503,'Experimental backend is not configured');
-  const session = bearer.exec(request.headers.get('authorization') || '')?.[1];
+  const session = sessionFromRequest(request, env);
   if (!session) return fail(401,'Unauthorized');
   try {
     const user = await authenticateSession(env.DB, session);
