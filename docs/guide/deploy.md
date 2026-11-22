@@ -37,3 +37,18 @@ Free services cannot attach a persistent disk. SQLite, accounts, signing keys, s
 5. Review the confirmation for Free only, no disk or paid resources. Do not proceed if Render requests a payment method you do not want to provide; account verification requirements are Render's decision. After deploy open the HTTPS URL, test `/ping`, sign in as `admin`, and use only dummy data. This does not verify persistence.
 
 Alternatively create a **new, separate** Blueprint using Blueprint Path `deploy/render/render.free-demo.yaml`; it generates the password in Environment and creates no disk. Never switch an existing service or Blueprint containing valuable data to this demo: changing or deleting resources can cause data loss. The root `render.yaml` remains the paid disk-backed configuration. Neither flow has been verified on a real Render account.
+
+## Mount public Catbox links (read-only)
+
+::: danger Catbox files are public
+Anyone with a Catbox URL can access it; Kova permissions or a password do not protect the original URL. Do not use sensitive files. This is a manually curated index of existing links, **not account login or account listing**. Upload, deletion and rename are unsupported; deleting the mount does not delete Catbox files.
+:::
+
+After the version with the Catbox driver is merged and deployed, go to **Console → Storages → Add storage**, choose `Catbox public links (read-only)` and use a separate mount path such as `/catbox`. Enter **your own** existing links, one file per line (these are examples, not real links):
+
+```text
+/photos/example.jpg|https://files.catbox.moe/abc123.jpg|12345
+/document.txt|https://files.catbox.moe/def456.txt|2048
+```
+
+The last value is the actual size in bytes; incorrect sizes can affect downloads. Only direct HTTPS `files.catbox.moe` URLs without query, fragment or subdirectories are accepted. Folders are virtual; edit and save the mount to change the index. Check the mount status and test an actual public file; real Catbox network access has not been tested here. Catbox policies and limits can change: see the [API](https://catbox.moe/tools.php), [FAQ](https://catbox.moe/faq.php), and [terms](https://catbox.moe/legal.php). The mount configuration needs persistent storage; Render Free can lose it on spin-down or restart.

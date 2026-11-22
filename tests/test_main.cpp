@@ -469,6 +469,45 @@ void test_database_vault_and_fts5() {
 // ============================================================================
 // 7. VFS Engine, Crypt Streaming AES-256-GCM Seek & Alias Loop Guard
 // ============================================================================
+void test_catbox_public_manifest_driver() {
+    auto driver = create_driver_instance("Catbox");
+    CHECK(driver != nullptr);
+    CHECK(driver->info().no_upload);
+    StorageRecord record;
+    std::string error;
+    auto set = [&](std::string_view files) {
+        record.addition = JsonValue::object({{"files", std::string(files)}}).dump();
+    };
+    set("/photos/hello.jpg|https://files.catbox.moe/a1b2c3.jpg|42\n/root.txt|https://files.catbox.moe/qwerty.txt|10");
+    CHECK(driver->init(record, nullptr, error));
+    std::vector<FileObj> entries;
+    CHECK(driver->list("/", entries, error));
+    CHECK(entries.size() == 2);
+    CHECK(driver->stat("/photos", error)->is_dir);
+    auto file = driver->stat("/photos/hello.jpg", error);
+    CHECK(file && !file->is_dir && file->size == 42);
+    UploadStream stream;
+    CHECK(!driver->put("/anything", stream, error));
+    CHECK(!driver->remove("/root.txt", error));
+    for (auto bad : {
+        "/a|http://files.catbox.moe/a|1",
+        "/a|https://files.catbox.moe.evil.test/a|1",
+        "/a|https://files.catbox.moe/a?x=1|1",
+        "/a|https://files.catbox.moe/../a|1",
+        "/a|https://files.catbox.moe/a|1\n/a|https://files.catbox.moe/b|2",
+        "/a|https://files.catbox.moe/a|1\n/a-|https://files.catbox.moe/b|1\n/a/b|https://files.catbox.moe/c|1",
+        "/../a|https://files.catbox.moe/a|1",
+        "/a|https://files.catbox.moe/a|-1"
+    }) {
+        set(bad);
+        CHECK(!driver->init(record, nullptr, error));
+    }
+    auto all = get_registered_drivers();
+    CHECK(std::any_of(all.begin(), all.end(), [](const auto& d) { return d.name == "Catbox"; }));
+    CHECK(create_driver_instance("GoogleDrive") != nullptr);
+    CHECK(create_driver_instance("Dropbox") != nullptr);
+}
+
 void test_vfs_crypt_driver_and_loop_guard() {
     std::string dir = "/tmp/alist_vfs_test_" + random_hex(6);
     std::filesystem::create_directories(dir + "/backing/enc_store");
@@ -1160,6 +1199,7 @@ int main() {
     RUN_TEST(test_ssrf_and_antiredos_glob);
     RUN_TEST(test_json_and_xml_bounds);
     RUN_TEST(test_database_vault_and_fts5);
+    RUN_TEST(test_catbox_public_manifest_driver);
     RUN_TEST(test_vfs_crypt_driver_and_loop_guard);
     RUN_TEST(test_zip_archive_security);
     RUN_TEST(test_live_http_api_webdav_and_concurrency);

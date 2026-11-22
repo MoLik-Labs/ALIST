@@ -38,6 +38,7 @@ function createHarness({ path = '/', role = 2, items = [], backendDown = false }
       { name: 'root_folder_path', label: 'Root folder', type: 'string', default_val: '', required: true },
       { name: 'show_hidden', label: 'Show hidden files', type: 'bool', default_val: false },
     ] },
+    { name: 'Catbox', display_name: 'Catbox public links (read-only)', fields: [{ name: 'files', label: 'Public Catbox links', type: 'text', required: true }] },
     { name: 'S3', display_name: 'S3 compatible', fields: [
       { name: 'bucket', label: 'Bucket', type: 'string', default_val: '' },
       { name: 'region', label: 'Region', type: 'string', default_val: 'us-east-1' },
@@ -189,6 +190,9 @@ async function testExplorerAndAdmin() {
   driver.value = 'S3'; driver.dispatchEvent(new window.Event('change', { bubbles: true }));
   assert.ok(document.querySelector('[name="driver_field_bucket"]'), 'Driver schema should render the S3 bucket field');
   assert.ok(document.querySelector('[name="driver_field_region"]'));
+  driver.value = 'Catbox'; driver.dispatchEvent(new window.Event('change', { bubbles: true }));
+  assert.ok(document.querySelector('textarea[name="driver_field_files"]'));
+  assert.ok(document.getElementById('driverFields').textContent.includes('Links remain public'), 'Catbox privacy warning must be visible');
   document.querySelector('[data-act="close-modal"]').click();
 
   document.querySelector('[data-tab="roles"]').click();

@@ -18,8 +18,8 @@ pin a commit when updating this audit, since upstream changes.
   upstream UI; obtain and verify the corresponding frontend separately before
   making claims about UI compatibility.
 - The current Kova production server is the native C++ implementation; the
-  separate Go prototype is incomplete. Native Kova registers eleven driver
-  names, not all upstream drivers. Matching a driver's name does not establish
+  separate Go prototype is incomplete. At the time of this audit, native Kova registered eleven driver
+  names (before the read-only Catbox addition), not all upstream drivers. Matching a driver's name does not establish
   operation, config, OAuth or data-format compatibility.
 - The two servers have different architectures and databases. Do not point
   a new backend at a real Kova or AList data directory as a migration shortcut.

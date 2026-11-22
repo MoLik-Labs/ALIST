@@ -7,7 +7,7 @@ the time of writing, not exhaustive verification against real providers.
 
 ## Driver inventory
 
-`src/drivers_virtual_crypt.cpp` registers eleven driver names:
+`src/drivers_virtual_crypt.cpp` registers native driver names (Catbox was added after the initial inventory):
 
 | Native driver | Independent Worker status | Important migration work |
 | --- | --- | --- |
@@ -18,6 +18,7 @@ the time of writing, not exhaustive verification against real providers.
 | WebDAV | Not implemented | HTTP methods, XML handling, streaming and SSRF controls |
 | SFTP, FTP | Not implemented | Runtime/network protocol feasibility and secure authentication must be verified; do not assume native libcurl transfers directly |
 | Local | Not implemented | Worker has no persistent host filesystem equivalent; evaluate virtual storage without claiming filesystem parity |
+| Catbox | Not implemented | Native mount is a read-only index of explicitly supplied public Catbox links, not account listing or upload |
 | URLTree | Not implemented | Source validation and outbound/redirect security |
 | Alias | Not implemented | Virtual mount resolution, access checks, cycle and traversal handling |
 | Crypt | Not implemented | Key lifecycle, format compatibility, encrypted paths and data, security review |

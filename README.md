@@ -13,7 +13,7 @@
 - Public share pages at `/s/:id`, with password and expiration/download-limit options.
 - Account security features including TOTP two-factor authentication and session management.
 - An Admin Console for storage mounts, users, roles/path rules, metadata rules, shares, tasks, system settings, and telemetry.
-- Built-in Local, S3, WebDAV, Google Drive, OneDrive, Dropbox, SFTP, FTP, URLTree, Alias, and Crypt storage drivers.
+- Built-in Local, S3, WebDAV, Google Drive, OneDrive, Dropbox, SFTP, FTP, URLTree, Alias, and Crypt storage drivers, plus a read-only index of public Catbox links.
 - Compatible server surfaces: `/api/*`, `/dav/*`, `/d/*`, `/p/*`, and the existing `alist` CLI.
 
 The browser UI is embedded in the native binary. Runtime assets are served locally; the application does not need a third-party CDN.

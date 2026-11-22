@@ -87,7 +87,7 @@
       choose: 'Choose', clear: 'Clear', action: 'Action', allFiles: 'All files', filesSelected: 'Selected files', folderSelected: 'Selected folder',
       sortAscending: 'Ascending', sortDescending: 'Descending', noResults: 'No results. Try a different query.',
       viewAdminTab: 'Open console', fileUpload: 'Upload file', folderUpload: 'Upload folder', copiedPath: 'Path copied',
-      driverLocal: 'Local filesystem', driverS3: 'S3-compatible storage', driverWebDAV: 'WebDAV storage', driverGoogleDrive: 'Google Drive',
+      driverLocal: 'Local filesystem', driverS3: 'S3-compatible storage', driverWebDAV: 'WebDAV storage', driverCatbox: 'Catbox public links (read-only)', catboxHelp: 'Public files only. One /path|https://files.catbox.moe/name.ext|size in bytes per line. Links remain public even if Kova access is restricted. No account listing or uploads.', driverGoogleDrive: 'Google Drive',
       driverOneDrive: 'OneDrive', driverDropbox: 'Dropbox', driverSFTP: 'SFTP', driverFTP: 'FTP', driverURLTree: 'URL tree', driverAlias: 'Alias mount', driverCrypt: 'Encrypted vault',
       confirm: 'Confirm', remove: 'Remove', noPermission: 'You do not have permission to perform this action.',
     },
@@ -158,7 +158,7 @@
       shortcutSelect: 'Chọn mục đang focus', shortcutRename: 'Đổi tên mục đã chọn', shortcutDelete: 'Xóa mục đã chọn', shortcutHelp: 'Hiển thị trợ giúp', notFound: 'Không tìm thấy mục được yêu cầu.', item: 'Mục', unknown: 'Không rõ', never: 'Không bao giờ', bytes: 'byte',
       choose: 'Chọn', clear: 'Xóa', action: 'Thao tác', allFiles: 'Tất cả tệp', filesSelected: 'Tệp đã chọn', folderSelected: 'Thư mục đã chọn', sortAscending: 'Tăng dần', sortDescending: 'Giảm dần', noResults: 'Không có kết quả. Hãy thử truy vấn khác.',
       viewAdminTab: 'Mở bảng quản trị', fileUpload: 'Tải tệp lên', folderUpload: 'Tải thư mục lên', copiedPath: 'Đã sao chép đường dẫn', driverLocal: 'Hệ thống tệp cục bộ', driverS3: 'Kho tương thích S3', driverWebDAV: 'Kho WebDAV',
-      driverGoogleDrive: 'Google Drive', driverOneDrive: 'OneDrive', driverDropbox: 'Dropbox', driverSFTP: 'SFTP', driverFTP: 'FTP', driverURLTree: 'Cây URL', driverAlias: 'Gắn bí danh', driverCrypt: 'Kho mã hóa', confirm: 'Xác nhận', remove: 'Gỡ bỏ', noPermission: 'Bạn không có quyền thực hiện thao tác này.',
+      driverCatbox: 'Liên kết Catbox công khai (chỉ đọc)', catboxHelp: 'Chỉ dùng tệp công khai. Mỗi dòng: /đường-dẫn|https://files.catbox.moe/tên-tệp|kích thước byte. Liên kết vẫn công khai dù Kova hạn chế truy cập. Không liệt kê tài khoản hoặc tải lên.', driverGoogleDrive: 'Google Drive', driverOneDrive: 'OneDrive', driverDropbox: 'Dropbox', driverSFTP: 'SFTP', driverFTP: 'FTP', driverURLTree: 'Cây URL', driverAlias: 'Gắn bí danh', driverCrypt: 'Kho mã hóa', confirm: 'Xác nhận', remove: 'Gỡ bỏ', noPermission: 'Bạn không có quyền thực hiện thao tác này.',
     }
   };
 
@@ -414,12 +414,13 @@
     Dropbox: '<svg viewBox="0 0 32 32" aria-hidden="true"><path fill="#0061ff" d="m10 6 7 4.5L10 15l-7-4.5zM22 6l7 4.5-7 4.5-7-4.5zM10 16l7 4.5L10 25l-7-4.5zM22 16l7 4.5-7 4.5-7-4.5z"/><path fill="#4c9aff" d="m16 23.5 6-4 6 4-6 4z"/></svg>',
     SFTP: '<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="5" y="5" width="22" height="9" rx="3" fill="#2071b9"/><rect x="5" y="18" width="22" height="9" rx="3" fill="#36a0c9"/><circle cx="10" cy="9.5" r="1.3" fill="#b9ebff"/><circle cx="10" cy="22.5" r="1.3" fill="#d6f7ff"/><path d="M15 9.5h8M15 22.5h8" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>',
     FTP: '<svg viewBox="0 0 32 32" aria-hidden="true"><path fill="#3476a8" d="M5 7a3 3 0 0 1 3-3h16a3 3 0 0 1 3 3v5H5z"/><path fill="#65a4ca" d="M5 14h22v5H5z"/><path fill="#3476a8" d="M5 21h22v4a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3z"/><circle cx="10" cy="9" r="1.3" fill="#f7cf63"/><circle cx="10" cy="16.5" r="1.3" fill="#dff5ff"/><circle cx="10" cy="23.5" r="1.3" fill="#8ce1a7"/></svg>',
+    Catbox: '<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="4" y="5" width="24" height="22" rx="5" fill="#e6ebf0"/><path d="M14 11h-2a5 5 0 0 0 0 10h2m4-10h2a5 5 0 0 1 0 10h-2m-6-5h8" fill="none" stroke="#315b85" stroke-width="2" stroke-linecap="round"/></svg>',
     URLTree: '<svg viewBox="0 0 32 32" aria-hidden="true"><path fill="#28a36a" d="M14 6h5v5h-5zM5 21h5v5H5zM22 21h5v5h-5z"/><path d="M16.5 11v5M7.5 16h17M7.5 16v5M24.5 16v5" stroke="#367d60" stroke-width="2" stroke-linecap="round"/></svg>',
     Alias: '<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="4" y="7" width="15" height="17" rx="3" fill="#5595d4"/><rect x="13" y="10" width="15" height="17" rx="3" fill="#f0b64a"/><path d="M13 15h6" stroke="#fff" stroke-width="2"/></svg>',
     Crypt: '<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="5" y="13" width="22" height="15" rx="3" fill="#167e85"/><path d="M10 13V9a6 6 0 0 1 12 0v4" fill="none" stroke="#49c2ad" stroke-width="3"/><circle cx="16" cy="20" r="2" fill="#d6f6eb"/><path d="M16 22v2" stroke="#d6f6eb" stroke-width="2"/></svg>'
   };
   function driverTitle(driver) {
-    const keys = { Local: 'driverLocal', S3: 'driverS3', WebDAV: 'driverWebDAV', GoogleDrive: 'driverGoogleDrive', OneDrive: 'driverOneDrive', Dropbox: 'driverDropbox', SFTP: 'driverSFTP', FTP: 'driverFTP', URLTree: 'driverURLTree', Alias: 'driverAlias', Crypt: 'driverCrypt' };
+    const keys = { Local: 'driverLocal', S3: 'driverS3', WebDAV: 'driverWebDAV', GoogleDrive: 'driverGoogleDrive', Catbox: 'driverCatbox', OneDrive: 'driverOneDrive', Dropbox: 'driverDropbox', SFTP: 'driverSFTP', FTP: 'driverFTP', URLTree: 'driverURLTree', Alias: 'driverAlias', Crypt: 'driverCrypt' };
     return t(keys[driver] || 'driver');
   }
   function driverIcon(driver) { return `<span class="driver-icon brand-svg" aria-hidden="true">${DRIVER_SVGS[driver] || DRIVER_SVGS.Local}</span>`; }
@@ -1401,7 +1402,8 @@
       const type = item.type === 'number' ? 'number' : item.type === 'password' ? 'password' : 'text';
       const input = item.type === 'text' ? 'textarea' : type;
       const id = `driver_${item.name}`;
-      return `${field(`driver_field_${item.name}`, item.label, value, input, { id, required: Boolean(item.required) })}<span class="field-help">${esc(item.help_text || '')}</span>`;
+      const help = name === 'Catbox' && item.name === 'files' ? t('catboxHelp') : (item.help_text || '');
+      return `${field(`driver_field_${item.name}`, item.label, value, input, { id, required: Boolean(item.required) })}<span class="field-help">${esc(help)}</span>`;
     }).join('')}</div>` : `<p class="field-help">${esc(t('unknown'))}</p>`;
   }
   async function saveStorage(form, fd) {
