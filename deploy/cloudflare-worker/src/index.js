@@ -59,7 +59,12 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
   if (!origin) return response(503, 'Kova edge proxy is not configured with a valid HTTPS KOVA_ORIGIN.');
 
   const incoming = new URL(request.url);
-  const upstreamUrl = new URL(`${incoming.pathname}${incoming.search}`, origin);
+  // Resolving a path beginning with // as a URL reference would replace the
+  // configured host and leak forwarded credentials to an attacker-controlled
+  // destination. Assign components to a fresh origin URL instead.
+  const upstreamUrl = new URL(origin.href);
+  upstreamUrl.pathname = incoming.pathname;
+  upstreamUrl.search = incoming.search;
   const headers = new Headers(request.headers);
   stripHopByHop(headers);
   headers.delete('host');

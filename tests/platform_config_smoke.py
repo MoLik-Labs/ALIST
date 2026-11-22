@@ -21,7 +21,7 @@ assert 'KOVA_ORIGIN' in json.loads((worker / 'package.json').read_text())['cloud
 readme = (root / 'README.md').read_text()
 assert 'render.com/deploy?repo=' in readme
 assert 'deploy.workers.cloudflare.com/?url=' in readme
-assert 'private' in readme and 'edge proxy' in readme
+assert 'public repository' in readme and 'edge proxy' in readme
 render = (root / 'render.yaml').read_text()
 assert 'mountPath: /opt/alist/data' in render and 'healthCheckPath: /ping' in render
 assert 'autoDeployTrigger: off' in render

@@ -6,9 +6,8 @@ This Worker is a **reverse proxy to an already-running Kova origin**. It does no
 
 [![Deploy Cloudflare edge proxy](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FMoLik-Labs%2FALIST%2Ftree%2FBETA%2Fdeploy%2Fcloudflare-worker)
 
-The button requires a public repository and deploys only this proxy. The current
-repository is private, so it cannot be used by others until made public or
-replaced with a public fork URL. It uses the `BETA` branch. You still need a
+The button requires a public repository and deploys only this proxy. It uses
+the `BETA` branch. You still need a
 running HTTPS origin and the `KOVA_ORIGIN` secret; without it the Worker returns
 503. The button flow has not been verified against a real Cloudflare account.
 

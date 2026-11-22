@@ -25,8 +25,8 @@ The standalone documentation website is in [`docs/site`](docs/site/). Serve that
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2FMoLik-Labs%2FALIST)
 [![Deploy Cloudflare edge proxy](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FMoLik-Labs%2FALIST%2Ftree%2FBETA%2Fdeploy%2Fcloudflare-worker)
 
-The repository is currently **private**: Cloudflare's button requires a public
-repository, and Render users need access to the repository. Buttons use `BETA`,
+Cloudflare's button requires a public repository, and Render users need access
+to the repository. Buttons use `BETA`,
 so changes in an unmerged branch are not included. Cloudflare deploys only the
 edge proxy; it needs a separate HTTPS origin and `KOVA_ORIGIN` secret. Render
 creates a paid persistent disk; review the plan and costs before confirming.
