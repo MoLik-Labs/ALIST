@@ -1,0 +1,3 @@
+# HTTPS origin of an independently deployed Kova server (no path or query).
+# Supply your real origin as a Cloudflare Worker secret during deployment.
+KOVA_ORIGIN=

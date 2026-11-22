@@ -56,6 +56,23 @@ assert.equal(upstream.headers.get('x-origin-hop'), null);
 assert.equal(upstream.headers.get('cache-control'), 'private, no-store');
 assert.equal(await upstream.text(), 'streamed-from-origin');
 
+// A network-path reference must remain an origin path, never become a host.
+for (const path of ['//attacker.invalid/collect?x=1', '///attacker.invalid/p', '/%2F%2Fattacker.invalid/x', '/file%20name?x=%2F']) {
+  const req = new Request('https://files.example.com' + path, { headers: { Authorization: 'Bearer sensitive-token' } });
+  let target, sentHeaders;
+  const result = await handleRequest(req, { KOVA_ORIGIN: 'https://kova-origin.example' }, async (url, init) => {
+    target = new URL(url);
+    sentHeaders = init.headers;
+    return new Response('ok');
+  });
+  const incomingUrl = new URL(req.url);
+  assert.equal(result.status, 200);
+  assert.equal(target.origin, 'https://kova-origin.example', 'request path must not replace the configured host');
+  assert.equal(target.pathname, incomingUrl.pathname);
+  assert.equal(target.search, incomingUrl.search);
+  assert.equal(sentHeaders.get('authorization'), 'Bearer sensitive-token');
+}
+
 const headRequest = new Request('https://files.example.com/healthz', { method: 'HEAD' });
 let headInit;
 const headResponse = await handleRequest(headRequest, { KOVA_ORIGIN: 'https://kova-origin.example' }, async (_url, init) => {

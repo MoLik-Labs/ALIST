@@ -37,6 +37,9 @@ jobs:
       - name: Test Cloudflare Worker proxy behavior
         run: npm run test:worker
 
+      - name: Check native platform deployment configuration
+        run: python3 tests/platform_config_smoke.py
+
       - name: Test documentation navigation
         run: npm run test:docs
 
