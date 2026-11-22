@@ -455,10 +455,20 @@
       return cmp * dir;
     });
   }
+  // Listings are replaced on every fetch, never mutated in place. Reuse the
+  // derived order when selection, layout or progressive rendering changes.
+  let filteredCache = null;
   function filteredItems() {
     const needle = normalizedSearch(state.filter.trim());
+    const { key, dir } = state.sort;
+    if (filteredCache && filteredCache.items === state.items && filteredCache.needle === needle &&
+        filteredCache.key === key && filteredCache.dir === dir && filteredCache.lang === state.lang) {
+      return filteredCache.result;
+    }
     const list = needle ? state.items.filter(item => normalizedSearch(item.name).includes(needle)) : state.items;
-    return applySort(list);
+    const result = applySort(list);
+    filteredCache = { items: state.items, needle, key, dir, lang: state.lang, result };
+    return result;
   }
   function makeCrumbs(container, path, share = false) {
     const segments = pathJoin('/', path).split('/').filter(Boolean);
@@ -516,8 +526,9 @@
     if (state.view === 'grid') {
       $('explorerContent').innerHTML = `<div class="file-grid">${visible.map((item, index) => itemRow(item, index, true)).join('')}</div>${visible.length < state.filtered.length ? `<div class="load-more-row"><button type="button" class="btn" data-act="load-more">${esc(t('loading'))} · ${visible.length}/${state.filtered.length}</button></div>` : ''}`;
     } else {
+      const sortAria = key => state.sort.key === key ? ` aria-sort="${state.sort.dir > 0 ? 'ascending' : 'descending'}"` : '';
       const sorted = key => `<button type="button" class="sort-btn${state.sort.key === key ? ' is-sorted' : ''}" data-act="sort" data-sort="${key}" aria-label="${esc(t(key === 'name' ? 'sortName' : key === 'size' ? 'sortSize' : 'sortDate'))}">${esc(t(key === 'name' ? 'name' : key === 'size' ? 'size' : 'modified'))}${state.sort.key === key ? (state.sort.dir > 0 ? ' ↑' : ' ↓') : ''}</button>`;
-      $('explorerContent').innerHTML = `<div class="table-wrap"><table class="file-table"><thead><tr><th class="col-check"><span class="sr-only">${esc(t('selectAll'))}</span></th><th>${sorted('name')}</th><th class="col-size">${sorted('size')}</th><th class="col-date">${sorted('modified')}</th><th class="col-ops">${esc(t('actions'))}</th></tr></thead><tbody>${visible.map((item, index) => itemRow(item, index)).join('')}</tbody></table></div>${visible.length < state.filtered.length ? `<div class="load-more-row"><button type="button" class="btn" data-act="load-more">${esc(t('loading'))} · ${visible.length}/${state.filtered.length}</button></div>` : ''}`;
+      $('explorerContent').innerHTML = `<div class="table-wrap"><table class="file-table"><thead><tr><th class="col-check"><span class="sr-only">${esc(t('selectAll'))}</span></th><th${sortAria('name')}>${sorted('name')}</th><th class="col-size"${sortAria('size')}>${sorted('size')}</th><th class="col-date"${sortAria('modified')}>${sorted('modified')}</th><th class="col-ops">${esc(t('actions'))}</th></tr></thead><tbody>${visible.map((item, index) => itemRow(item, index)).join('')}</tbody></table></div>${visible.length < state.filtered.length ? `<div class="load-more-row"><button type="button" class="btn" data-act="load-more">${esc(t('loading'))} · ${visible.length}/${state.filtered.length}</button></div>` : ''}`;
     }
     observeLoadMore(); updateBatchDock(); renderSidebar();
   }

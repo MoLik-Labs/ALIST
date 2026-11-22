@@ -22,6 +22,9 @@ async function eventually(predicate, message, timeout = 2000) {
 
 function createHarness({ path = '/', role = 2, items = [], backendDown = false } = {}) {
   const window = new Window({ url: `http://kova.test${path}` });
+  let collatorCreations = 0;
+  const OriginalCollator = window.Intl.Collator;
+  window.Intl.Collator = function (...args) { collatorCreations++; return new OriginalCollator(...args); };
   window.document.write(html);
   window.document.close();
   window.localStorage.setItem('kova.session.v1', 'smoke-token');
@@ -69,7 +72,7 @@ function createHarness({ path = '/', role = 2, items = [], backendDown = false }
     if (backendDown) throw new Error('network unavailable');
     if (pathName === '/api/public/settings') return response({ app_name: 'Kova', site_title: 'Kova', version: 'v4.2.0', guest_enabled: true });
     if (pathName === '/api/me') return response(user);
-    if (pathName === '/api/fs/list') return response({ content: files, total: files.length, write: role === 2, provider: 'Local', readme: '# Workspace' });
+    if (pathName === '/api/fs/list') return response({ content: files.map(item => ({ ...item })), total: files.length, write: role === 2, provider: 'Local', readme: '# Workspace' });
     if (pathName === '/api/fs/dirs') return response([{ name: 'Documents', is_dir: true, type: 1 }, { name: '..', is_dir: true, type: 1 }]);
     if (pathName === '/api/fs/get') {
       const reqPath = body?.path || '/hello.txt';
@@ -114,7 +117,7 @@ function createHarness({ path = '/', role = 2, items = [], backendDown = false }
   }
   window.XMLHttpRequest = FakeXHR;
   window.eval(app);
-  return { window, calls };
+  return { window, calls, collatorCount: () => collatorCreations };
 }
 
 async function testExplorerAndAdmin() {
@@ -122,14 +125,38 @@ async function testExplorerAndAdmin() {
     name: `file-${String(i).padStart(5, '0')}.txt`, size: i + 1, is_dir: false,
     modified: '2026-11-16T00:00:00Z', type: 5,
   }));
-  const { window, calls } = createHarness({ items });
+  const { window, calls, collatorCount } = createHarness({ items });
   const { document } = window;
   await eventually(() => document.querySelectorAll('#explorerContent tbody tr').length === 160, 'Explorer did not render the initial virtualized window');
   assert.ok(document.querySelector('[data-act="load-more"]'), 'large listings must expose progressive loading');
+  const initialSorts = collatorCount();
   document.querySelector('[data-act="load-more"]').click();
   await eventually(() => document.querySelectorAll('#explorerContent tbody tr').length === 320, 'Load more did not expand the rendered window');
+  assert.equal(collatorCount(), initialSorts, 'progressive loading must reuse sorted results');
+  document.getElementById('btnViewGrid').click();
+  assert.equal(collatorCount(), initialSorts, 'view changes must reuse sorted results');
+  document.getElementById('btnViewList').click();
+  const filter = document.getElementById('filterInput');
+  filter.value = 'file-09999';
+  filter.dispatchEvent(new window.Event('input', { bubbles: true }));
+  assert.equal(document.querySelectorAll('#explorerContent tbody tr').length, 1);
+  assert.ok(document.getElementById('explorerContent').textContent.includes('file-09999'));
+  assert.ok(collatorCount() > initialSorts, 'filter change must invalidate cached results');
+  filter.value = '';
+  filter.dispatchEvent(new window.Event('input', { bubbles: true }));
+  document.querySelector('[data-act="sort"][data-sort="size"]').click();
+  assert.ok(document.querySelector('#explorerContent tbody tr').textContent.includes('file-00000'));
+  assert.equal(document.querySelector('th[aria-sort]').getAttribute('aria-sort'), 'ascending');
+  document.querySelector('[data-act="sort"][data-sort="size"]').click();
+  assert.ok(document.querySelector('#explorerContent tbody tr').textContent.includes('file-09999'), 'sort direction must invalidate cache');
+  assert.equal(document.querySelector('th[aria-sort]').getAttribute('aria-sort'), 'descending');
+  items[0] = { ...items[0], name: 'fresh-entry.txt', size: 20000 };
+  document.getElementById('btnRefresh').click();
+  await eventually(() => document.querySelector('#explorerContent tbody tr')?.textContent.includes('fresh-entry.txt'), 'refresh must invalidate the cached listing');
 
+  const beforeLanguageSorts = collatorCount();
   document.getElementById('btnLang').click();
+  assert.ok(collatorCount() > beforeLanguageSorts, 'language change must invalidate cached ordering');
   assert.equal(document.documentElement.lang, 'vi', 'language switch should update document language');
   document.getElementById('btnLang').click();
   assert.equal(document.documentElement.lang, 'en');
@@ -180,7 +207,7 @@ async function testExplorerAndAdmin() {
 
 async function testDynamicExplorerDialogs() {
   const items = Array.from({ length: 2 }, (_, i) => ({ name: i ? 'notes.md' : 'hello.txt', size: 12, is_dir: false, modified: '2026-11-16T00:00:00Z', type: 5 }));
-  const { window, calls } = createHarness({ items });
+  const { window, calls, collatorCount } = createHarness({ items });
   const { document } = window;
   await eventually(() => document.querySelectorAll('#explorerContent tbody tr').length === 2, 'Small explorer listing did not load');
 
