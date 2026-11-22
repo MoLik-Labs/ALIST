@@ -38,3 +38,11 @@ compile_commands.json
 # VitePress generated docs
 /docs/guide/.vitepress/cache/
 /docs/guide/.vitepress/dist/
+
+# Local Cloudflare-native secrets and emulated data
+/deploy/cloudflare-native/.dev.vars
+/deploy/cloudflare-native/.dev.vars.*
+/deploy/cloudflare-native/.env
+/deploy/cloudflare-native/.env.*
+/deploy/cloudflare-native/.wrangler/
+/.wrangler/

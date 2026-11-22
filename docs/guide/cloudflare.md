@@ -8,7 +8,7 @@ The current Worker and Pages projects forward requests to a Kova server you host
 
 1. First deploy Kova on a host with a persistent disk. Verify its HTTPS URL, `/ping` and login.
 2. Use the Worker deployment button in the repository README, or connect your fork to Workers Builds. For your fork select the correct branch and root directory `deploy/cloudflare-worker`.
-3. Set the **runtime secret** `KOVA_ORIGIN` to your server's HTTPS origin, for example `https://example.onrender.com` (no path, query, user or password). Build-time variables alone do not configure runtime secrets.
+3. `KOVA_ORIGIN` is the HTTPS URL of **your separately deployed Kova server**, not a code issued by Cloudflare. For example, after deploying to Render, find the service URL in its dashboard, check `/ping` and login, and use its origin such as `https://example.onrender.com` (no path, query, user or password). Set that as the **runtime secret** `KOVA_ORIGIN`. Build-time variables alone do not configure runtime secrets. If you have no separate server, you do not yet have this value; the standalone Cloudflare backend is not complete.
 4. Deploy and open the Worker URL. Test login, listing, upload/download, and restart. A 503 may indicate a missing or invalid origin; a 502 indicates an upstream failure. Check Cloudflare's build and runtime logs without sharing secrets.
 
 ## Pages proxy

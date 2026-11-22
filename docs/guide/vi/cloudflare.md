@@ -8,7 +8,7 @@ Worker và Pages hiện tại chỉ chuyển tiếp request tới server Kova đ
 
 1. Triển khai server Kova trước trên host có ổ đĩa bền vững. Kiểm tra URL HTTPS, `/ping` và đăng nhập.
 2. Dùng nút Worker trong README, hoặc kết nối fork với Workers Builds. Với fork, chọn đúng nhánh và root directory `deploy/cloudflare-worker`.
-3. Đặt **runtime secret** `KOVA_ORIGIN` thành origin HTTPS của server, ví dụ `https://example.onrender.com` (không có đường dẫn, query, tên người dùng hoặc mật khẩu). Biến chỉ dùng lúc build không thay thế runtime secret.
+3. `KOVA_ORIGIN` là URL HTTPS của **server Kova bạn đã triển khai riêng**, không phải mã do Cloudflare cấp. Ví dụ sau khi deploy Render, lấy URL service trên dashboard Render như `https://example.onrender.com`, kiểm tra `/ping` và đăng nhập; dùng phần origin không có đường dẫn, query, tên người dùng hoặc mật khẩu. Đặt giá trị đó làm **runtime secret** `KOVA_ORIGIN`. Biến chỉ dùng lúc build không thay thế runtime secret. Nếu chưa có server riêng, bạn chưa có giá trị này; bản backend Cloudflare độc lập vẫn chưa hoàn chỉnh.
 4. Deploy, mở URL Worker và thử đăng nhập, xem danh sách, tải lên/tải xuống và khởi động lại. 503 có thể do origin thiếu hoặc sai; 502 là lỗi kết nối phía server. Xem log Cloudflare nhưng không chia sẻ secret.
 
 ## Proxy Pages
