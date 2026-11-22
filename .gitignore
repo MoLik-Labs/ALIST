@@ -45,4 +45,5 @@ compile_commands.json
 /deploy/cloudflare-native/.env
 /deploy/cloudflare-native/.env.*
 /deploy/cloudflare-native/.wrangler/
+/deploy/cloudflare-native/wrangler.isolated.toml
 /.wrangler/

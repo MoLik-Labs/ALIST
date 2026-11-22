@@ -13,7 +13,7 @@ Worker và Pages hiện tại chỉ chuyển tiếp request tới server Kova đ
 
 ## Proxy Pages
 
-Tạo dự án Pages kết nối repo và nhánh của bạn. Đặt root directory là `deploy/cloudflare-pages`, build command là `exit 0`, output directory là `public`. Đặt runtime secret `KOVA_ORIGIN` như trên rồi deploy lại. Xem [hướng dẫn Pages](https://github.com/MoLik-Labs/Kova-INC/tree/BETA/deploy/cloudflare-pages). Cần kiểm tra kết nối Git và deploy trên tài khoản của bạn.
+Tạo dự án Pages kết nối repo và nhánh của bạn. Đặt root directory là `deploy/cloudflare-pages`, build command là `exit 0`, output directory là `public`. Đặt runtime secret `KOVA_ORIGIN` như trên rồi deploy lại. Xem `deploy/cloudflare-pages/README.md` trong repository và nhánh bạn chọn. Cần kiểm tra kết nối Git và deploy trên tài khoản của bạn.
 
 ## Trang mất giao diện hoặc nút không hoạt động?
 
@@ -32,3 +32,9 @@ Nếu cần preview, trước hết xác định đúng Worker và root director
 ## Giới hạn miễn phí cần lưu ý
 
 Theo [giới hạn chính thức của Workers](https://developers.cloudflare.com/workers/platform/limits/), gói Free có hạn mức request và CPU; chạm hạn mức có thể khiến dịch vụ không xử lý được yêu cầu. D1, R2 và Google Drive có hạn mức riêng. Không có cách hứa hẹn sử dụng vô hạn miễn phí. Hãy kiểm tra giới hạn hiện hành, chi phí dự kiến và bảo vệ dữ liệu trước khi tạo tài nguyên. Bản Cloudflare-native trong repo vẫn là thử nghiệm, chưa được kiểm thử trên dịch vụ thật.
+
+## Worker đang là static-only và build sai nhánh?
+
+Nếu trang Settings ghi không thể thêm runtime variables/bindings vì Worker chỉ có static assets, deploy hiện tại không có backend. Ví dụ cấu hình production branch `BETA`, root `/`, lệnh `npx wrangler deploy` sẽ không tự chọn backend Cloudflare trong `deploy/cloudflare-native`. Một preview command `npx wrangler preview` tại root cũng không tự cấu hình preview.
+
+Để tránh tiếp tục deploy nhầm trong lúc chuẩn bị backend, tại **Settings → Builds** bật **Disable builds** cho Production và tắt **Builds for Preview branches** ở tab preview. Không xóa Worker, không đổi preview command thành `wrangler deploy`. Các thay đổi này chỉ ngăn build mới; chúng không sửa bản deploy hiện tại. Tạo Worker thử nghiệm riêng, tách D1/R2 và secrets trước khi kiểm tra backend; mã có thể nằm trên PR hoặc nhánh khác nên cần xác nhận nhánh thực sự chứa commit. Không dùng cấu hình local `wrangler.local.toml` cho production.

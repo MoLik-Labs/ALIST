@@ -4,7 +4,7 @@ on:
   push:
     branches: ["**"]
   pull_request:
-    branches: ["BETA", "main"]
+    branches: ["BETA", "main", "CLOUDFLARE"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -43,8 +43,14 @@ jobs:
       - name: Test experimental Cloudflare-native reader
         run: npm run test:cf-native
 
+      - name: Test experimental Cloudflare UI
+        run: npm run test:cf-ui
+
       - name: Test experimental Cloudflare Google Drive connector
         run: npm run test:cf-google-drive
+
+      - name: Test experimental Cloudflare Dropbox connector
+        run: npm run test:cf-dropbox
 
       - name: Test experimental Cloudflare access foundation
         run: npm run test:cf-access
@@ -82,6 +88,8 @@ jobs:
           npm run test:docs
           npm run docs:build
           npm run test:docs-build
+          GITHUB_REPOSITORY=ExampleOwner/ForkName DOCS_BASE=/ npm run docs:build
+          GITHUB_REPOSITORY=ExampleOwner/ForkName DOCS_BASE=/ npm run test:docs-build
 
       - name: Test Go workspace UI
         run: npm run test:go-ui
@@ -126,6 +134,7 @@ jobs:
       - name: Validate Cloudflare Worker bundle with Wrangler
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
+          node ../../tests/cloudflare_isolated_config_test.mjs
           node ../../tests/cloudflare_access_workerd_test.mjs
           node ../../tests/cloudflare_sessions_workerd_test.mjs
           node ../../tests/cloudflare_user_management_workerd_test.mjs

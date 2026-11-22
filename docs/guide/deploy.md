@@ -12,14 +12,14 @@ A disk-backed SQLite deployment is intended for **one server instance**. Multipl
 
 ## Docker Compose
 
-On a Linux host with Docker and Compose installed:
+On a Linux host with Docker and Compose installed, replace `YOUR_GITHUB_CLONE_URL` with the HTTPS clone URL of **your fork** (GitHub → your repository → Code):
 
 ```sh
-git clone https://github.com/MoLik-Labs/Kova-INC.git
-cd Kova-INC
+git clone YOUR_GITHUB_CLONE_URL kova
+cd kova
 docker compose up -d --build
 ```
 
 Open `http://localhost:5244` on the host. Obtain the initial generated password from protected container logs, or set a strong `ALIST_ADMIN_PASSWORD` before first initialization. Do not share logs containing generated credentials. `./data` holds SQLite, keys and configuration; back it up. Protect network access and terminate HTTPS before exposing the service.
 
-For Railway, Fly.io and other hosts, see the [platform guide](https://github.com/MoLik-Labs/Kova-INC/blob/BETA/docs/platform-deployment.md). Cloud platform flows have not all been verified on real accounts.
+For Railway, Fly.io and other hosts, see `docs/platform-deployment.md` in your chosen repository and branch. Cloud platform flows have not all been verified on real accounts.
