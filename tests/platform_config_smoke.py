@@ -26,4 +26,8 @@ render = (root / 'render.yaml').read_text()
 assert 'mountPath: /opt/alist/data' in render and 'healthCheckPath: /ping' in render
 assert "autoDeployTrigger: 'off'" in render
 assert 'key: ALIST_ADMIN_PASSWORD\n        generateValue: true' in render
+free = (root / 'deploy/render/render.free-demo.yaml').read_text()
+assert 'plan: free' in free and 'disk:' not in free
+assert 'healthCheckPath: /ping' in free and 'KOVA_DISPOSABLE_DEMO' in free
+assert 'generateValue: true' in free and 'runtime: docker' in free
 print('Platform configuration invariants passed (no cloud deployment performed)')
