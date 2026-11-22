@@ -9,6 +9,9 @@ for (const [path, lang] of [['index.html', 'en-US'], ['start.html', 'en-US'], ['
   assert.ok(html.includes(`lang="${lang}"`), `${path} must have correct language`);
   assert.ok(html.includes(`${base}assets/`), `${path} must use the configured GitHub Pages base`);
   assert.ok(html.includes('Kova Docs'), `${path} must have a title`);
+  const source = process.env.DOCS_REPOSITORY || process.env.GITHUB_REPOSITORY;
+  if (source) assert.ok(html.includes(`https://github.com/${source}`), `${path} must link to the build repository`);
+  if (source && source !== 'MoLik-Labs/Kova-INC') assert.ok(!html.includes('https://github.com/MoLik-Labs/Kova-INC'), `${path} must not link to the upstream repository`);
 }
 const en = await readFile(new URL('cloudflare.html', dist), 'utf8');
 const vi = await readFile(new URL('vi/cloudflare.html', dist), 'utf8');

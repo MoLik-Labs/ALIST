@@ -88,6 +88,8 @@ jobs:
           npm run test:docs
           npm run docs:build
           npm run test:docs-build
+          GITHUB_REPOSITORY=ExampleOwner/ForkName DOCS_BASE=/ npm run docs:build
+          GITHUB_REPOSITORY=ExampleOwner/ForkName DOCS_BASE=/ npm run test:docs-build
 
       - name: Test Go workspace UI
         run: npm run test:go-ui

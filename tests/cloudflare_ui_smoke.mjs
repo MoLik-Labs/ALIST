@@ -3,6 +3,7 @@ import {readFile} from 'node:fs/promises';
 import {Window} from 'happy-dom';
 const root=new URL('../deploy/cloudflare-native/ui/',import.meta.url);
 const html=await readFile(new URL('index.html',root),'utf8'), script=await readFile(new URL('app.js',root),'utf8');
+assert.ok(!html.includes('github.com/MoLik-Labs/Kova-INC'), 'the workspace must not direct forks to the upstream repo');
 const window=new Window({url:'https://worker.test/'});window.document.write(html);
 const id='ABCDEFGHIJKLMNOPQRSTUV', session='A'.repeat(43), calls=[];
 window.fetch=async (path,options={})=>{calls.push({path:String(path),authorization:options.headers?.get('authorization')});

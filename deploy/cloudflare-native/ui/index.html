@@ -21,7 +21,7 @@
     <div class="sidebar-heading" data-i18n="navigation">KHÔNG GIAN</div>
     <a class="nav-item active" href="#main"><span class="nav-symbol">▦</span><span data-i18n="files">Tệp của tôi</span></a>
     <a class="nav-item" href="#connections"><span class="nav-symbol">◈</span><span data-i18n="connections">Kết nối</span></a>
-    <a class="nav-item" href="https://github.com/MoLik-Labs/Kova-INC/blob/CLOUDFLARE/deploy/cloudflare-native/README.md" target="_blank" rel="noreferrer"><span class="nav-symbol">↗</span><span data-i18n="guide">Hướng dẫn</span></a>
+    <a class="nav-item" href="#help"><span class="nav-symbol">↗</span><span data-i18n="guide">Hướng dẫn</span></a>
     <div class="sidebar-bottom"><div class="sidebar-mark">K</div><div><strong>Kova Cloud</strong><small data-i18n="separate">Backend độc lập · thử nghiệm</small></div></div>
   </aside>
   <main id="main" tabindex="-1">
@@ -38,7 +38,8 @@
       <details class="add-connection"><summary data-i18n="addDropbox">Thêm Dropbox bằng token thử nghiệm</summary><form id="dropboxForm"><p class="hint" data-i18n="dropboxHint">Dùng access token ngắn hạn của tài khoản thử nghiệm. OAuth và tự làm mới chưa được hỗ trợ.</p><label for="dropboxToken" data-i18n="dropboxToken">Dropbox access token</label><div class="form-row"><input id="dropboxToken" type="password" autocomplete="off" required><button class="button primary" type="submit" data-i18n="add">Thêm kết nối</button></div></form></details></section>
       <section class="files-section" aria-labelledby="files-title"><div class="section-head files-head"><div><div class="section-label" data-i18n="browser">TRÌNH DUYỆT TỆP</div><h2 id="files-title" data-i18n="files">Tệp của tôi</h2><p id="location" data-i18n="selectSource">Chọn kết nối ở trên để bắt đầu.</p></div><div class="file-buttons"><button id="disconnect" class="button quiet" type="button" hidden data-i18n="disconnect">Xóa kết nối</button><button id="back" class="button secondary" type="button" hidden data-i18n="back">Thư mục trước</button></div></div><div class="table-wrap"><div class="table-head"><span data-i18n="name">TÊN</span><span data-i18n="type">LOẠI</span><span data-i18n="size">KÍCH THƯỚC</span><span></span></div><div id="fileList" class="file-list"><div class="empty"><div class="empty-icon">⌁</div><strong data-i18n="emptyTitle">Không gian của bạn, gọn gàng hơn.</strong><p data-i18n="emptyText">Chọn một kết nối để xem các thư mục và tệp.</p></div></div></div><button id="more" class="button secondary more" type="button" hidden data-i18n="more">Xem thêm</button></section>
     </section>
-    <footer><span>Kova Cloud <span class="dot">·</span> <span data-i18n="footer">Được thiết kế cho những kết nối đơn giản hơn.</span></span><a href="https://github.com/MoLik-Labs/Kova-INC" target="_blank" rel="noreferrer">GitHub ↗</a></footer>
+    <details id="help" class="help-panel"><summary data-i18n="helpTitle">Hướng dẫn sử dụng thử nghiệm</summary><p data-i18n="helpText">Đăng nhập bằng tài khoản được cấp trước, kết nối Google Drive hoặc Dropbox, rồi chọn kết nối để duyệt tệp. Sau khi hoàn tất cấp quyền ở cửa sổ mới, quay lại và làm mới. Việc xóa kết nối không thu hồi quyền tại nhà cung cấp. Xem tài liệu trong repository và nhánh Cloudflare của bạn để biết cách cấu hình và các giới hạn.</p></details>
+    <footer><span>Kova Cloud <span class="dot">·</span> <span data-i18n="footer">Được thiết kế cho những kết nối đơn giản hơn.</span></span></footer>
   </main>
 </div>
 </body>
