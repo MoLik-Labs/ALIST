@@ -26,6 +26,20 @@ existing key. That behavior was tested locally, not with real R2. Do not enable
 writes or use production data until there is a security review and real-cloud
 verification.
 
+## Experimental Cloudflare interface
+
+A separate interface lives in `ui/` and is served only when an `ASSETS` binding
+is present. It is not the native Kova frontend and is not a complete Kova
+replacement. It can use experimental session, Google Drive and Dropbox v2 APIs,
+but sign-in currently requires manually entering the callback's session token.
+Tokens are retained in tab memory only; the browser never stores them in URLs
+or local storage. UI downloads are limited to 8 MiB. The local Wrangler config
+binds assets for visual preview but has no D1 or login configuration; sign-in
+will not work there. The [English](../../docs/guide/cloudflare-preview.md) and
+[Tiếng Việt](../../docs/guide/vi/cloudflare-preview.md) tutorials cover its
+limitations and safe local preview. This UI and backend are not ready for
+production, real accounts, or sensitive data.
+
 ## Local runtime test (no Cloudflare account)
 
 Install the pinned Wrangler dependencies with `npm ci --ignore-scripts` in
@@ -71,7 +85,7 @@ file. CSV exports only the first sheet. Exports do not support ranges, and
 Exports are served as attachments, and provider errors are not returned verbatim.
 Upload, recursive/full-text search, multipart ranges, shortcuts, OAuth consent UI,
 per-user credentials, permissions, credential revocation, rate limiting and
-multi-drive management are not implemented. There is no Kova UI integration.
+multi-drive management are not implemented. The experimental Cloudflare UI is separate from the native Kova UI.
 
 For a future isolated experiment, Google Drive API must be enabled, an OAuth
 client and an offline refresh token obtained securely with a suitable read-only
@@ -158,7 +172,7 @@ primitives: 256-bit random tokens, token hashes in D1, fixed expiry (at most
 local workerd/D1 emulator; they do not verify production D1. The opt-in `/v2`
 experiment validates and revokes sessions; the separately disabled Google
 login prototype can issue sessions for pre-provisioned identities. `issueSession`
-must only be called after a trusted authentication flow verifies identity. There is no password authentication, login UI, reset,
+must only be called after a trusted authentication flow verifies identity. There is no password authentication, production-ready login UI, reset,
 2FA, CSRF policy, session cookie handling, brute-force protection, multi-user
 provider authorization or operational key recovery. Disabling an account must
 also permanently revoke its sessions, preferably atomically; otherwise enabling
@@ -189,7 +203,7 @@ workerd/D1 emulation. They do not constitute a security review or test real D1.
 An isolated `/v2/google-drive/` experiment uses this vault and session
 primitives for owner-only listing and downloads; it is disabled unless
 `KOVA_EXPERIMENTAL_V2=enabled`. It has no production-ready login or
-connection provisioning and is not integrated into the Kova UI. The older `/v1` prototype still uses one
+connection provisioning and is available through a separate experimental Cloudflare UI. The older `/v1` prototype still uses one
 account-level bearer secret and must not be treated as multi-user.
 Key provisioning, key versioning/rotation, safe backup/recovery, audit, OAuth
 consent/revocation, deletion semantics at Google and grant-based sharing are not
@@ -215,7 +229,7 @@ with mock Google responses and local workerd/D1 emulation only.
 
 **Do not enable or deploy for users:** there is no production-ready login,
 account provisioning, consent UI, provider-side credential revocation, D1 migration
-deployment, durable throttling or UI, and no real provider test. It does not implement
+deployment, durable throttling or production-ready UI, and no real provider test. It does not implement
 roles, resource sharing or Kova API compatibility. The test harness seeds users,
 sessions and connections directly and is not part of the Worker. The v1 shared
 bearer routes remain separate and would bypass these owner checks if enabled.
@@ -227,8 +241,7 @@ An opt-in `/v2/google-drive/oauth/start` and callback prototype requests the
 Google Drive read-only scope using PKCE, a random single-use state, an encrypted
 short-lived verifier and a live initiating session. It stores the refresh token
 in the experimental owner-scoped vault. OAuth requires both experimental flags
-and a configured fixed HTTPS callback URI; the actual application has no login
-or connection UI. The separate login prototype is disabled by default. The flow has mock and
+and a configured fixed HTTPS callback URI; the separate experimental UI can start this flow but is not production-ready. The separate login prototype is disabled by default. The flow has mock and
 local D1/workerd tests only and has not been verified with Google or deployed
 Cloudflare resources. **Do not enable it for users or sensitive data.**
 
@@ -254,7 +267,7 @@ is not an identifier. On success it returns a one-hour bearer session as JSON.
 The workerd test uses synthetic users, generated signing keys and mock Google
 responses; no Google account, Cloudflare deployment or browser was tested.
 
-This is not ready for users: no onboarding/provisioning UI, browser login UI,
+This is not ready for users: no onboarding/provisioning UI, production-ready browser login UI,
 durable rate limiting, account recovery, audit, session security policy, consent
 handling or real provider validation exists. Anyone can fill the prototype's
 global pending-attempt cap, causing denial of service. Removing an identity does

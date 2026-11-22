@@ -15,6 +15,7 @@
     "docs:build": "vitepress build docs/guide",
     "docs:preview": "python3 -m http.server 4173 --bind 0.0.0.0 --directory docs/guide/.vitepress/dist",
     "test:cf-native": "node tests/cloudflare_native_test.mjs",
+    "test:cf-ui": "node tests/cloudflare_native_ui_test.mjs && node tests/cloudflare_ui_smoke.mjs",
     "test:docs-build": "node tests/docs_bilingual_smoke.mjs",
     "test:cf-google-drive": "node tests/cloudflare_google_drive_test.mjs",
     "test:cf-dropbox": "node tests/cloudflare_dropbox_test.mjs && node tests/cloudflare_connected_dropbox_test.mjs",

@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {handleRequest} from '../deploy/cloudflare-native/src/index.js';
+const paths=[];
+const env={ASSETS:{async fetch(req){paths.push(new URL(req.url).pathname); return new Response('asset',{status:200,headers:{'content-type':'text/html; charset=utf-8'}});}}};
+let response=await handleRequest(new Request('https://worker.test/'),env);
+assert.equal(response.status,200); assert.equal(await response.text(),'asset');
+assert.match(response.headers.get('content-security-policy'),/default-src 'self'/);
+assert.match(response.headers.get('content-security-policy'),/frame-ancestors 'none'/);
+assert.equal(response.headers.get('x-content-type-options'),'nosniff');
+assert.equal((await handleRequest(new Request('https://worker.test/app.js'),env)).status,200);
+assert.equal((await handleRequest(new Request('https://worker.test/app.css'),env)).status,200);
+assert.equal((await handleRequest(new Request('https://worker.test/app.css',{method:'HEAD'}),env)).status,200);
+assert.equal((await handleRequest(new Request('https://worker.test/private.txt'),env)).status,503);
+assert.equal((await handleRequest(new Request('https://worker.test/',{method:'POST'}),env)).status,503);
+assert.deepEqual(paths,['/','/app.js','/app.css','/app.css']);
+assert.equal((await handleRequest(new Request('https://worker.test/'),{})).status,503);
+console.log('Experimental Cloudflare UI asset security tests passed');
