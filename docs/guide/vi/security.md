@@ -7,3 +7,7 @@
 5. Tách secret và storage của staging, preview và production. Theo dõi log triển khai và cập nhật có kiểm soát. Giới hạn Cloudflare và sự cố nhà cung cấp có thể ảnh hưởng upload; thử client và kích thước tệp thực tế.
 
 `/ping` chỉ cho biết tiến trình còn chạy, không chứng minh storage hay backup hoạt động. Cần thử thao tác tệp và khôi phục thực tế. Các biện pháp giảm rủi ro, không đảm bảo tuyệt đối an toàn.
+
+### Upload Local và sao chép S3
+
+Upload Local có kích thước khai báo sẽ bị từ chối nếu thiếu hoặc thừa dữ liệu; file đích cũ được giữ khi xảy ra các lỗi này. Dữ liệu file tạm được đồng bộ trước khi đổi tên, nhưng điều này không bảo đảm an toàn khi mất điện và không thay thế backup. Sao chép phía máy chủ S3 yêu cầu `CopyObjectResult` hợp lệ có ETag trước khi báo thành công; nhà cung cấp không trả kết quả chuẩn này có thể bị từ chối. Các kiểm tra này không xác minh byte tại đích hoặc làm thao tác di chuyển giữa các ổ trở nên nguyên tử. Hãy thử bằng dữ liệu giả trên nhà cung cấp của bạn.

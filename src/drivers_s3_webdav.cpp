@@ -275,6 +275,7 @@ public:
     bool copy(std::string_view src_subpath, std::string_view dst_subpath, std::string& err_out) override {
         std::string src_key = to_s3_key(clean_vpath(src_subpath).value_or("/"), false);
         std::string dst_key = to_s3_key(clean_vpath(dst_subpath).value_or("/"), false);
+        if (src_key == dst_key) { err_out = "Cannot copy an S3 object onto itself"; return false; }
         auto [host, dst_uri] = build_host_and_uri(dst_key);
         std::map<std::string, std::string> extra = {
             {"x-amz-copy-source", "/" + url_encode(bucket_) + "/" + url_encode(src_key, true)}
@@ -287,17 +288,39 @@ public:
         req.url = scheme_ + "://" + host + dst_uri;
         req.headers = std::move(hdrs);
         req.allow_private_net = allow_private_net_;
+        // S3 CopyObject may return HTTP 200 with an XML Error after the copy
+        // starts. Do not delete the source on a missing, malformed or error body.
+        std::string copy_response;
+        constexpr size_t max_copy_response = 1024 * 1024;
+        req.on_data = [&](const char* data, size_t size) {
+            if (size > max_copy_response - copy_response.size()) return false;
+            copy_response.append(data, size);
+            return true;
+        };
         auto resp = HttpClient::instance().perform(req);
         if (!resp.ok || resp.status_code != 200) {
             err_out = "S3 copy failed with HTTP " + std::to_string(resp.status_code);
+            return false;
+        }
+        auto xml = parse_xml(copy_response);
+        if (!xml || xml->local_name() != "CopyObjectResult" ||
+            trim_ascii(xml->child_text("ETag")).empty()) {
+            err_out = "S3 copy did not return a valid success result";
             return false;
         }
         return true;
     }
 
     bool rename_or_move(std::string_view src_subpath, std::string_view dst_subpath, std::string& err_out) override {
-        if (!copy(src_subpath, dst_subpath, err_out)) return false;
-        return remove(src_subpath, err_out);
+        auto src = clean_vpath(src_subpath);
+        auto dst = clean_vpath(dst_subpath);
+        if (!src || !dst || *src == "/" || *dst == "/") {
+            err_out = "Invalid S3 source or destination";
+            return false;
+        }
+        if (*src == *dst) return true; // Never copy and then delete the same key.
+        if (!copy(*src, *dst, err_out)) return false;
+        return remove(*src, err_out);
     }
 
     bool put(std::string_view dst_subpath, UploadStream& stream, std::string& err_out) override {
