@@ -58,3 +58,7 @@ compile_commands.json
 # Python interpreter artifacts
 __pycache__/
 *.pyc
+
+# Local skill reference clones (tracked snapshots are under skills/)
+/.cache/skills/
+/.cache/kova-preview-data/

@@ -94,7 +94,9 @@ public:
     }
 
     std::optional<FileObj> stat(std::string_view subpath, std::string& err_out) override {
-        auto clean = clean_vpath(subpath).value_or("/");
+        auto clean_path = clean_vpath(subpath);
+        if (!clean_path) { err_out = "Invalid S3 path"; return std::nullopt; }
+        const auto& clean = *clean_path;
         if (clean == "/") {
             FileObj root;
             root.name = "/";
@@ -130,19 +132,34 @@ public:
             f.type = classify_file_type(f.name, false);
             return f;
         }
-        // Check if virtual prefix folder exists
-        std::vector<FileObj> children;
-        if (list(clean, children, err_out)) {
-            auto [_, base] = split_vpath(clean);
-            FileObj dir;
-            dir.name = base;
-            dir.is_dir = true;
-            dir.type = 1;
-            dir.modified = unix_now();
-            return dir;
+        if (!resp.ok || resp.status_code != 404) {
+            err_out = resp.error.empty() ? ("S3 HEAD HTTP " + std::to_string(resp.status_code)) : resp.error;
+            return std::nullopt;
         }
-        err_out = "S3 object not found";
-        return std::nullopt;
+        // A directory can be represented by a zero-byte marker, children, or
+        // both. An empty successful listing alone is not evidence it exists.
+        auto [marker_host, marker_uri] = build_host_and_uri(to_s3_key(clean, true));
+        OutboundRequest marker;
+        marker.method = "HEAD";
+        marker.url = scheme_ + "://" + marker_host + marker_uri;
+        marker.headers = aws_sigv4_sign_headers(creds_, "HEAD", marker_host, marker_uri, "", empty_hash, unix_now());
+        marker.allow_private_net = allow_private_net_;
+        auto marker_resp = HttpClient::instance().perform(marker);
+        if (!marker_resp.ok || (marker_resp.status_code != 200 && marker_resp.status_code != 404)) {
+            err_out = marker_resp.error.empty() ? ("S3 marker HEAD HTTP " + std::to_string(marker_resp.status_code)) : marker_resp.error;
+            return std::nullopt;
+        }
+        bool exists = marker_resp.status_code == 200;
+        if (!exists) {
+            std::vector<FileObj> children;
+            if (!list(clean, children, err_out)) return std::nullopt;
+            exists = !children.empty();
+        }
+        if (!exists) { err_out = "S3 object not found"; return std::nullopt; }
+        auto [_, base] = split_vpath(clean);
+        FileObj dir;
+        dir.name = base; dir.is_dir = true; dir.type = 1; dir.modified = unix_now();
+        return dir;
     }
 
     bool list(std::string_view subpath, std::vector<FileObj>& out, std::string& err_out) override {

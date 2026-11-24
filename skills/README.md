@@ -75,3 +75,21 @@ sandbox's network; its detector and engine-dependent commands are not verified.
 Refer to the relevant skill text directly until that engine is available. Cloned
 source files and tests are available; this is not proof that every upstream
 script or optional feature runs here.
+
+## Additional design and Vercel skills
+
+- [`ui-ux-pro-max/`](ui-ux-pro-max/SKILL.md): UI/UX Pro Max skill, data,
+  references and search scripts from `nextlevelbuilder/ui-ux-pro-max-skill`
+  at `a4fc248f6136552cb881e298847abc7ddce84e6b`; upstream MIT license is
+  preserved.
+- [`vercel-agent-skills/skills/`](vercel-agent-skills/skills/): skill folders
+  from `vercel-labs/agent-skills` at
+  `5a37a6329fbad3666c3207392a6a7c0110e92efb`; upstream README declares MIT.
+  These include stack-specific and deployment instructions; they are references,
+  not permission to deploy or transmit credentials. Distribution archives are
+  omitted because their source folders are included.
+
+`AGENTS.md` points future repository-aware agents to this workflow. A new chat
+may not automatically read that file or register these skills; automatic use
+depends on the agent runtime. The snapshots and local integrity check do not
+install or execute plugins, hooks or commands.

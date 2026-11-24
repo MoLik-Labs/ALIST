@@ -240,7 +240,7 @@
     listMeta: null, rootItems: [], canWrite: false, filter: '', view: readStore('kova.view', 'list') === 'grid' ? 'grid' : 'list',
     sort: { key: 'name', dir: 1 }, renderLimit: 160, focusIndex: -1, selected: new Set(),
     listController: null, searchController: null, palette: { scope: 0, global: true, index: 0, timer: 0, results: [] },
-    pathPasswords: {}, readmeRaw: false, modalReturnFocus: null, previewUrls: [], previewMode: 'view',
+    pathPasswords: {}, readmeRaw: false, modalReturnFocus: null, paletteReturnFocus: null, previewUrls: [], previewMode: 'view',
     contextPath: '', uploadQueue: [], uploadXhr: null, uploadCancel: false, uploadStarted: 0, uploadBytes: 0,
     picker: null, adminTab: 'overview', adminTimer: 0, monitorTimer: 0, monitorBusy: false, telemetryPaused: false, adminData: {},
     share: null, shareSubpath: '/', shareItems: [], shareController: null, shareToken: '', shareUnlocked: false,
@@ -372,10 +372,17 @@
     $('btnTopAdmin').hidden = !state.user || Number(state.user.role) !== 2;
     $('writeToolbar').hidden = !state.canWrite;
   }
-  function closeSidebar() {
+  function syncSidebarVisibility() {
+    const mobile = window.matchMedia('(max-width: 960px)').matches;
+    $('appSidebar').toggleAttribute('inert', mobile && !$('appSidebar').classList.contains('is-open'));
+  }
+  function closeSidebar(restoreFocus = false) {
+    const wasOpen = $('appSidebar').classList.contains('is-open');
     $('appSidebar').classList.remove('is-open');
     $('sidebarScrim').hidden = true;
     $('btnMobileNav').setAttribute('aria-expanded', 'false');
+    syncSidebarVisibility();
+    if (restoreFocus && wasOpen) $('btnMobileNav').focus();
   }
   function setViewMode(view) {
     state.currentView = view;
@@ -434,7 +441,7 @@
         ${mounts.map(item => nav(item.name, pathJoin('/', item.name), '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.8 6a1.5 1.5 0 0 1 1.5-1.5h4l1.5 1.7h6A1.4 1.4 0 0 1 17.2 7.6v7a1.5 1.5 0 0 1-1.5 1.5H4.3a1.5 1.5 0 0 1-1.5-1.5z"/></svg>', active(pathJoin('/', item.name)))).join('')}
       </div>
       <div class="nav-group"><div class="nav-group-label">${esc(t('pinned'))}</div>
-        ${nav(t('allFiles'), '/', '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 5.5h13v10h-13zM6.5 8.5h7M6.5 11.5h5"/></svg>', active('/'))}
+        ${nav(t('allFiles'), '/', '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 5.5h13v10h-13zM6.5 8.5h7M6.5 11.5h5"/></svg>')}
         <button type="button" class="nav-item" data-act="open-account"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="6.5" r="3"/><path d="M4 17a6 6 0 0 1 12 0"/></svg><span class="nav-item-label">${esc(t('account'))}</span></button>
         <button type="button" class="nav-item" data-act="show-shortcuts"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.8" y="4" width="14.4" height="12" rx="2"/><path d="M6 8h.01M9 8h.01M12 8h.01M15 8h.01M6 12h.01M9 12h.01M12 12h.01"/></svg><span class="nav-item-label">${esc(t('shortcuts'))}</span></button>
       </div>`;
@@ -685,12 +692,24 @@
   function closePalette() {
     $('paletteOverlay').hidden = true;
     document.body.classList.toggle('has-overlay', !$('modalOverlay').hidden);
-    state.searchController?.abort(); hideContext(); $('cmdTrigger').focus();
+    state.searchController?.abort(); hideContext();
+    if (state.paletteReturnFocus?.isConnected && !state.paletteReturnFocus.closest('[inert]')) state.paletteReturnFocus.focus();
+    else if (window.matchMedia('(max-width: 960px)').matches) $('btnMobileNav').focus();
+    state.paletteReturnFocus = null;
   }
   function openPalette() {
+    state.paletteReturnFocus = document.activeElement;
     closeSidebar(); $('paletteOverlay').hidden = false; document.body.classList.add('has-overlay');
     $('paletteInput').value = ''; state.palette.index = 0; state.palette.results = [];
-    renderPalette([]); setTimeout(() => $('paletteInput').focus(), 0);
+    renderPalette([]); setTimeout(() => { if (!$('paletteOverlay').hidden) $('paletteInput').focus(); }, 0);
+  }
+  function trapDialogTab(event, container) {
+    const focusables = Array.from(container.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])'))
+      .filter(el => !el.closest('[hidden]') && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none');
+    if (!focusables.length) { event.preventDefault(); return; }
+    const first = focusables[0], last = focusables.at(-1);
+    if (event.shiftKey && (document.activeElement === first || !container.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && (document.activeElement === last || !container.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
   }
   function renderPalette(results) {
     const commands = [
@@ -1606,8 +1625,8 @@
     const id = element.dataset.id || '';
     if (action === 'toggle-lang') { state.lang = state.lang === 'en' ? 'vi' : 'en'; writeStore('kova.language', state.lang); applyLanguage(); }
     else if (action === 'toggle-theme') setTheme(state.theme === 'system' ? 'light' : state.theme === 'light' ? 'dark' : 'system');
-    else if (action === 'toggle-sidebar') { const open = !$('appSidebar').classList.contains('is-open'); $('appSidebar').classList.toggle('is-open', open); $('sidebarScrim').hidden = !open; $('btnMobileNav').setAttribute('aria-expanded', String(open)); }
-    else if (action === 'close-sidebar') closeSidebar();
+    else if (action === 'toggle-sidebar') { const open = !$('appSidebar').classList.contains('is-open'); $('appSidebar').classList.toggle('is-open', open); $('sidebarScrim').hidden = !open; $('btnMobileNav').setAttribute('aria-expanded', String(open)); syncSidebarVisibility(); }
+    else if (action === 'close-sidebar') closeSidebar(true);
     else if (action === 'go-home') { if (state.currentView === 'share') { history.pushState({}, '', '/'); } await loadDir('/'); }
     else if (action === 'navigate') await loadDir(path);
     else if (action === 'open-admin') openAdmin();
@@ -1784,9 +1803,10 @@
   function onKeyDown(event) {
     const target = event.target;
     const editable = target.matches('input, textarea, select, [contenteditable="true"]');
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); if ($('paletteOverlay').hidden) openPalette(); else closePalette(); return; }
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k' && $('modalOverlay').hidden) { event.preventDefault(); if ($('paletteOverlay').hidden) openPalette(); else closePalette(); return; }
     if (!$('paletteOverlay').hidden) {
       if (event.key === 'Escape') { event.preventDefault(); closePalette(); }
+      else if (event.key === 'Tab') trapDialogTab(event, $('paletteOverlay'));
       else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault(); const max = state.palette.results.length - 1;
         if (max >= 0) { state.palette.index = (state.palette.index + (event.key === 'ArrowDown' ? 1 : -1) + state.palette.results.length) % state.palette.results.length; renderPalette(state.palette.results.filter(item => item.kind === 'file')); }
@@ -1795,16 +1815,10 @@
     }
     if (!$('modalOverlay').hidden) {
       if (event.key === 'Escape') { event.preventDefault(); closeModal(); }
-      if (event.key === 'Tab') {
-        const focusables = Array.from($('modalContent').querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href]')).filter(el => el.offsetParent !== null);
-        if (focusables.length) {
-          const first = focusables[0], last = focusables.at(-1);
-          if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-          else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-        }
-      }
+      if (event.key === 'Tab') trapDialogTab(event, $('modalOverlay'));
       return;
     }
+    if (event.key === 'Escape' && $('appSidebar').classList.contains('is-open')) { event.preventDefault(); closeSidebar(true); return; }
     if (event.key === 'Escape') { hideContext(); if (state.selected.size) { state.selected.clear(); renderExplorer(); } return; }
     if (event.key === '?' && !editable) { event.preventDefault(); showShortcuts(); return; }
     if (event.key === '/' && !editable) { event.preventDefault(); $('filterInput').focus(); return; }
@@ -1851,10 +1865,13 @@
   document.addEventListener('drop', onDrop);
   window.addEventListener('popstate', handlePopState);
   window.addEventListener('resize', () => {
+    if (!window.matchMedia('(max-width: 960px)').matches) closeSidebar();
+    else syncSidebarVisibility();
     const tab = $('adminTabs')?.querySelector(`[data-tab="${state.adminTab}"]`);
     if (tab) { const indicator = $('adminTabIndicator'); indicator.style.width = `${tab.offsetWidth}px`; indicator.style.transform = `translateX(${tab.offsetLeft - 4}px)`; }
   }, { passive: true });
   setTheme(state.theme);
+  syncSidebarVisibility();
   applyLanguage();
   loadInitial();
 })();

@@ -596,6 +596,51 @@ void test_s3_list_pagination() {
     }
 }
 
+void test_s3_stat_existence() {
+    std::atomic<int> mode{0};
+    std::atomic<int> requests{0};
+    HttpServer fake("127.0.0.1", 0, 2, 16);
+    fake.set_handler([&](HttpRequest& req, HttpResponse& resp) {
+        ++requests;
+        if (req.method == "HEAD") {
+            if (mode == 3) { resp.status = 403; return; }
+            if (mode == 4 && !req.path.ends_with('/')) { resp.status = 200; return; }
+            resp.status = (mode == 1 && req.path.ends_with('/')) ? 200 : 404;
+            return;
+        }
+        if (mode == 5) { resp.status = 503; return; }
+        resp.body = mode == 2
+          ? "<ListBucketResult><IsTruncated>false</IsTruncated><Contents><Key>path/child.txt</Key><Size>2</Size></Contents></ListBucketResult>"
+          : "<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>";
+    });
+    CHECK(fake.start());
+    ScopeExit stop([&] { fake.stop(); });
+    auto driver = create_driver_instance("S3");
+    StorageRecord rec;
+    rec.addition = JsonValue::object({
+        {"bucket", "bucket"}, {"endpoint", "http://127.0.0.1:" + std::to_string(fake.bound_port())},
+        {"access_key_id", "test"}, {"secret_access_key", "test"}, {"allow_private_net", true}
+    }).dump();
+    std::string error;
+    CHECK(driver && driver->init(rec, nullptr, error));
+    CHECK(!driver->stat("/path", error)); // missing key and empty listing
+    mode = 1;
+    auto marker = driver->stat("/path", error);
+    CHECK(marker && marker->is_dir);
+    mode = 2;
+    auto prefix = driver->stat("/path", error);
+    CHECK(prefix && prefix->is_dir);
+    mode = 3; requests = 0;
+    CHECK(!driver->stat("/path", error));
+    CHECK(error.find("403") != std::string::npos && requests == 1);
+    mode = 4;
+    auto file = driver->stat("/path", error);
+    CHECK(file && !file->is_dir);
+    mode = 5;
+    CHECK(!driver->stat("/path", error));
+    CHECK(error.find("503") != std::string::npos);
+}
+
 void test_s3_copy_response_integrity() {
     std::atomic<int> response_kind{0};
     std::atomic<int> deletes{0};
@@ -1475,6 +1520,7 @@ int main() {
     RUN_TEST(test_catbox_public_manifest_driver);
     RUN_TEST(test_remote_copy_http_failure);
     RUN_TEST(test_s3_list_pagination);
+    RUN_TEST(test_s3_stat_existence);
     RUN_TEST(test_s3_copy_response_integrity);
     RUN_TEST(test_local_upload_integrity);
     RUN_TEST(test_vfs_crypt_driver_and_loop_guard);

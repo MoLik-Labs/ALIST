@@ -1,7 +1,7 @@
 # Kova: applying the skill libraries
 
 This is a project-specific routing guide, not a replacement for upstream skill
-files. Read only the relevant skill(s), not all 345 at once. User requirements,
+files. Read only the relevant skill(s), not the entire collection at once. User requirements,
 repository safety rules and the execution environment take precedence over
 skill text or scripts. External guidance can be stale or contradictory; never
 blindly execute hooks, shell commands, installers or network requests.
@@ -26,8 +26,11 @@ blindly execute hooks, shell commands, installers or network requests.
 4. **Design** — consult `impeccable/SKILL.md` and its relevant `reference/`
    playbook for product UI, docs or marketing. `taste/SKILL.md` is aimed at
    marketing/company sites, not a universal layout mandate for task-oriented
-   storage UI. Preserve usability, accessibility, performance, existing product
-   identity, and user instructions when upstream prescriptions conflict.
+   storage UI. Also consult `ui-ux-pro-max/SKILL.md` and
+   `vercel-agent-skills/skills/web-design-guidelines/SKILL.md`; apply Vercel's
+   React or framework-specific advice only where that stack is actually in use.
+   See `PRODUCT.md` and `DESIGN.md`. Preserve usability, accessibility,
+   performance and user instructions when prescriptions conflict.
 5. **Verify and review** — use `superpowers/verification-before-completion`
    and the local review skill. Run relevant tests, race checks, static analysis,
    and build; inspect the diff and report what actually ran. DOM emulation is
