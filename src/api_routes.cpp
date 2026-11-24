@@ -499,10 +499,16 @@ void ApiRouter::handle_mcp(HttpRequest& req, HttpResponse& resp) {
         if (key != "path" && key != "page") { send_error(id, -32602, "Invalid tool arguments"); return; }
     }
     auto path = vfs_.resolve_user_path(user, args.get("path").as_sv());
+    // MCP deliberately treats any inherited password as a barrier, even if a
+    // closer metadata record has no password. Snapshot once per request so
+    // checking every listed child does not repeatedly copy the metadata cache.
+    const auto metas = db_.list_metas();
     auto protected_by_password = [&](std::string_view target) {
-        auto meta = db_.find_nearest_meta(target);
-        return meta && !meta->password.empty() &&
-            (meta->path == target || (meta->p_sub && is_subpath(meta->path, target)));
+        for (const auto& meta : metas) {
+            if (!meta.password.empty() &&
+                (meta.path == target || (meta.p_sub && is_subpath(meta.path, target)))) return true;
+        }
+        return false;
     };
     if (!path || !has_perm(vfs_.effective_permissions(user, *path), PermMCPAccess) || protected_by_password(*path)) {
         send_result(tool_result(JsonValue::object({{"error", "MCP access denied"}}), true)); return;

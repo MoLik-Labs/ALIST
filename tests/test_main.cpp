@@ -1260,6 +1260,14 @@ void test_live_http_api_webdav_and_concurrency() {
     CHECK(admin_listing.body.find("secret_vault") == std::string::npos);
     auto denied_secret = mcp(admin_jwt, R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"fs_get","arguments":{"path":"/local/secret_vault/confidential.txt"}}})");
     CHECK(denied_secret.body.find("isError\":true") != std::string::npos);
+    MetaRecord nested_meta;
+    nested_meta.path = "/local/secret_vault/confidential.txt";
+    nested_meta.readme = "Nested metadata must not override inherited MCP protection";
+    auto nested_meta_id = db.create_meta(nested_meta);
+    CHECK(nested_meta_id > 0);
+    auto nested_denied = mcp(admin_jwt, R"({"jsonrpc":"2.0","id":33,"method":"tools/call","params":{"name":"fs_get","arguments":{"path":"/local/secret_vault/confidential.txt"}}})");
+    CHECK(nested_denied.body.find("isError\":true") != std::string::npos);
+    CHECK(db.delete_meta(nested_meta_id));
     CHECK(mcp(admin_jwt, R"({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"fs_delete","arguments":{"path":"/local"}}})").body.find("-32602") != std::string::npos);
     RoleRecord mcp_role;
     mcp_role.name = "mcp-scoped-test";
