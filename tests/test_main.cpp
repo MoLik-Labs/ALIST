@@ -508,6 +508,97 @@ void test_catbox_public_manifest_driver() {
     CHECK(create_driver_instance("Dropbox") != nullptr);
 }
 
+void test_s3_copy_response_integrity() {
+    std::atomic<int> response_kind{0};
+    std::atomic<int> deletes{0};
+    HttpServer fake("127.0.0.1", 0, 2, 16);
+    fake.set_handler([&](HttpRequest& req, HttpResponse& resp) {
+        if (req.method == "DELETE") { ++deletes; resp.status = 204; return; }
+        switch (response_kind.load()) {
+            case 0: resp.body = "<Error><Code>InternalError</Code></Error>"; break;
+            case 1: resp.body = "<CopyObjectResult><ETag>incomplete"; break;
+            case 2: resp.body = "<CopyObjectResult></CopyObjectResult>"; break;
+            case 3: resp.body = "<CopyObjectResult><ETag>\"abc\"</ETag></CopyObjectResult>"; break;
+            case 4: resp.body = std::string(1024 * 1024 + 1, 'x'); break;
+            default: resp.status = 500; break;
+        }
+    });
+    CHECK(fake.start());
+    ScopeExit stop([&] { fake.stop(); });
+    auto driver = create_driver_instance("S3");
+    CHECK(driver != nullptr);
+    StorageRecord rec;
+    rec.addition = JsonValue::object({
+        {"bucket", "bucket"}, {"endpoint", "http://127.0.0.1:" + std::to_string(fake.bound_port())},
+        {"access_key_id", "test"}, {"secret_access_key", "test"}, {"allow_private_net", true}
+    }).dump();
+    std::string error;
+    CHECK(driver->init(rec, nullptr, error));
+    for (int kind : {0, 1, 2, 4, 5}) {
+        response_kind = kind;
+        CHECK(!driver->rename_or_move("/source", "/dest", error));
+        CHECK(deletes.load() == 0);
+    }
+    response_kind = 3;
+    CHECK(driver->rename_or_move("/source", "/source", error));
+    CHECK(deletes.load() == 0);
+    CHECK(!driver->copy("/source", "/source", error));
+    CHECK(deletes.load() == 0);
+    CHECK(driver->copy("/source", "/dest", error));
+    CHECK(deletes.load() == 0);
+    CHECK(driver->rename_or_move("/source", "/dest", error));
+    CHECK(deletes.load() == 1);
+}
+
+void test_local_upload_integrity() {
+    std::string root = "/tmp/alist_local_upload_" + random_hex(6);
+    std::filesystem::create_directories(root);
+    ScopeExit cleanup([&] { std::error_code ec; std::filesystem::remove_all(root, ec); });
+    auto driver = create_driver_instance("Local");
+    CHECK(driver != nullptr);
+    StorageRecord rec;
+    rec.addition = JsonValue::object({{"root_folder_path", root}}).dump();
+    std::string error;
+    CHECK(driver->init(rec, nullptr, error));
+    auto read_file = [&] { std::ifstream f(root + "/target", std::ios::binary); return std::string(std::istreambuf_iterator<char>(f), {}); };
+    { std::ofstream f(root + "/target"); f << "original"; }
+    auto upload = [&](std::string payload, int64_t declared, bool fail) {
+        UploadStream stream;
+        stream.size = declared;
+        size_t pos = 0;
+        stream.read_fn = [&](char* buf, size_t max_len) -> ssize_t {
+            if (pos == payload.size()) return fail ? -1 : 0;
+            size_t n = std::min(max_len, payload.size() - pos);
+            std::memcpy(buf, payload.data() + pos, n);
+            pos += n;
+            return static_cast<ssize_t>(n);
+        };
+        return driver->put("/target", stream, error);
+    };
+    CHECK(!upload("short", 10, false));
+    CHECK(read_file() == "original");
+    CHECK(!upload("too long", 3, false));
+    CHECK(read_file() == "original");
+    CHECK(!upload("broken", -1, true));
+    CHECK(read_file() == "original");
+    UploadStream invalid_reader;
+    invalid_reader.read_fn = [](char*, size_t limit) -> ssize_t { return static_cast<ssize_t>(limit + 1); };
+    CHECK(!driver->put("/target", invalid_reader, error));
+    CHECK(read_file() == "original");
+    for (const auto& entry : std::filesystem::directory_iterator(root))
+        CHECK(!entry.path().filename().string().starts_with(".alist_upload_"));
+    CHECK(upload("exact", 5, false));
+    CHECK(read_file() == "exact");
+    CHECK(upload("unknown", -1, false));
+    CHECK(read_file() == "unknown");
+    CHECK(upload("", 0, false));
+    CHECK(read_file().empty());
+    rec.addition = JsonValue::object({{"root_folder_path", root}, {"read_only", true}}).dump();
+    CHECK(driver->init(rec, nullptr, error));
+    CHECK(!upload("overwrite", 9, false));
+    CHECK(read_file().empty());
+}
+
 void test_vfs_crypt_driver_and_loop_guard() {
     std::string dir = "/tmp/alist_vfs_test_" + random_hex(6);
     std::filesystem::create_directories(dir + "/backing/enc_store");
@@ -616,6 +707,20 @@ void test_vfs_crypt_driver_and_loop_guard() {
     };
     std::string err;
     CHECK(vfs.put_stream("/vault/movie.mp4", up, err));
+
+    // A truncated replacement must not publish a partially encrypted object.
+    size_t partial_pos = 0;
+    UploadStream partial;
+    partial.filename = "movie.mp4";
+    partial.size = 100;
+    partial.read_fn = [&](char* b, size_t m) -> ssize_t {
+        if (partial_pos) return 0;
+        size_t n = std::min<size_t>(m, 5);
+        std::memcpy(b, "short", n);
+        partial_pos += n;
+        return static_cast<ssize_t>(n);
+    };
+    CHECK(!vfs.put_stream("/vault/movie.mp4", partial, err));
 
     // Verify filename on disk is encrypted!
     bool found_cipher_file = false;
@@ -1280,6 +1385,8 @@ int main() {
     RUN_TEST(test_json_and_xml_bounds);
     RUN_TEST(test_database_vault_and_fts5);
     RUN_TEST(test_catbox_public_manifest_driver);
+    RUN_TEST(test_s3_copy_response_integrity);
+    RUN_TEST(test_local_upload_integrity);
     RUN_TEST(test_vfs_crypt_driver_and_loop_guard);
     RUN_TEST(test_zip_archive_security);
     RUN_TEST(test_live_http_api_webdav_and_concurrency);

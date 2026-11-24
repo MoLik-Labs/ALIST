@@ -246,13 +246,22 @@ public:
         ScopeExit unlink_tmp([&] { ::unlink(tmp_path.c_str()); });
 
         std::vector<char> buf(131072); // 128 KiB write buffer
+        int64_t remaining = stream.size; // -1 denotes unknown length
         while (true) {
             ssize_t n = stream.read_fn ? stream.read_fn(buf.data(), buf.size()) : 0;
             if (n < 0) {
                 err_out = "Stream read error during upload";
                 return false;
             }
-            if (n == 0) break;
+            if (n == 0) {
+                if (remaining > 0) { err_out = "Upload ended before the declared size"; return false; }
+                break;
+            }
+            if (static_cast<size_t>(n) > buf.size() || (remaining >= 0 && n > remaining)) {
+                err_out = "Upload exceeded the declared size or buffer";
+                return false;
+            }
+            if (remaining >= 0) remaining -= n;
             size_t written = 0;
             while (written < static_cast<size_t>(n)) {
                 ssize_t w = ::write(fd.get(), buf.data() + written, static_cast<size_t>(n) - written);
@@ -264,7 +273,12 @@ public:
                 written += static_cast<size_t>(w);
             }
         }
-        fd.reset(); // Close before rename
+        // Flush file data before publishing it. This detects delayed I/O errors;
+        // directory metadata is not fsynced, so this is not a crash-durability guarantee.
+        int sync_rc;
+        do { sync_rc = ::fsync(fd.get()); } while (sync_rc < 0 && errno == EINTR);
+        if (sync_rc < 0) { err_out = "Failed to sync uploaded file"; return false; }
+        if (::close(fd.release()) != 0) { err_out = "Failed to close uploaded file"; return false; }
 
         if (::rename(tmp_path.c_str(), dst_full->c_str()) != 0) {
             err_out = "Atomic rename failed after upload";
