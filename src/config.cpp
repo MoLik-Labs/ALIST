@@ -149,6 +149,7 @@ bool AppConfig::load_or_create(const std::string& data_dir_override) {
     debug            = env_bool_or("ALIST_DEBUG", debug);
     allow_private_net_outbound = env_bool_or("ALIST_ALLOW_PRIVATE_NET", allow_private_net_outbound);
     trust_proxy      = env_bool_or("ALIST_TRUST_PROXY", trust_proxy);
+    enable_mcp       = env_bool_or("ALIST_ENABLE_MCP", false);
 
     std::filesystem::create_directories(temp_dir, ec);
     ::chmod(temp_dir.c_str(), 0700);

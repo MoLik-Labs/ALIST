@@ -35,6 +35,7 @@ private:
 
     std::optional<AuthContext> authenticate(const HttpRequest& req, HttpResponse& resp, bool allow_guest = true);
     void serve_spa(const HttpRequest& req, HttpResponse& resp) const;
+    void handle_mcp(HttpRequest& req, HttpResponse& resp);
     void handle_direct_or_proxy(HttpRequest& req, HttpResponse& resp, bool force_proxy);
     void handle_archive_extract(HttpRequest& req, HttpResponse& resp);
     void handle_share_download(HttpRequest& req, HttpResponse& resp, bool force_proxy);

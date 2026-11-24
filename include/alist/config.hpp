@@ -29,6 +29,7 @@ struct AppConfig {
 
     bool allow_private_net_outbound = false; // SSRF guard default: block private/IMDS IPs!
     bool tls_insecure_skip_verify   = false;
+    bool enable_mcp                 = false; // opt-in, read-only MCP HTTP endpoint
     bool trust_proxy                = false; // Only trust X-Forwarded-For when behind trusted reverse proxy
 
     std::vector<std::string> cors_allow_origins = {"*"};
