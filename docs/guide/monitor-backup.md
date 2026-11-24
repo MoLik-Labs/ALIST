@@ -6,6 +6,8 @@
 
 The optional separate Worker below is inspired by UptimeFlare, not a full port: no notifications, multiple monitors or automatic upgrades. Its status page is **public**. Monitor only a service you own or are authorized to check. Five-minute checks may reduce idle spin-down but **do not guarantee availability**. Render may restart or suspend services for other reasons, and its 750 Free instance hours/month are shared across the workspace. Pinging does not make the filesystem durable. Read [Render Free](https://render.com/docs/free).
 
+A cron job **inside the service itself** only runs while that process is alive. Once the service sleeps or stops, that cron also stops and cannot wake it. Pings may reduce idle sleep but do not guarantee availability or durable storage. The separate external monitor below is optional and does not modify the existing service.
+
 ## Optional Render monitor (not yet tested in a real account)
 
 1. Once the changes are merged and pushed, clone the correct branch of **your fork**, install Node.js/npm, enter the repo and run `npm ci --ignore-scripts --prefix deploy/cloudflare-worker`.

@@ -6,6 +6,8 @@
 
 Bản theo dõi thử nghiệm dưới đây là một Worker **riêng**, lấy ý tưởng từ UptimeFlare; không phải bản sao đầy đủ, không có cảnh báo, nhiều monitor hay tự nâng cấp. Trang trạng thái là **công khai**. Không nhập URL hoặc bí mật vào trang; không dùng URL người khác mà chưa được phép. Lịch kiểm tra năm phút có thể giúp giảm ngủ do không truy cập, **không đảm bảo Render luôn bật**. Render vẫn có thể restart hoặc ngừng service vì hạn mức; 750 giờ miễn phí/tháng dùng chung workspace, nhiều service có thể hết hạn mức. Ping không làm filesystem bền vững. Xem [Render Free](https://render.com/docs/free) trước khi bật.
 
+Tự ping URL công khai từ cron **bên trong chính service** chỉ chạy khi tiến trình còn sống; nếu service đã ngủ, dừng hoặc restart thì cron đó cũng dừng và không thể tự đánh thức. Ping có thể giảm khả năng ngủ nhưng không đảm bảo luôn hoạt động, và không thay thế lưu trữ bền vững. Vì vậy monitor bên ngoài dưới đây là lựa chọn độc lập; không tự bật hay yêu cầu thay đổi service hiện tại.
+
 ## Worker kiểm tra Render (tùy chọn, chưa thử trên tài khoản thật)
 
 1. Sau khi thay đổi được merge và push, clone **fork của bạn** đúng nhánh như hướng dẫn Render, cài Node.js/npm, vào thư mục repo và chạy `npm ci --ignore-scripts --prefix deploy/cloudflare-worker`.

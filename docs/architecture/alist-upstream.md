@@ -4,9 +4,10 @@ This is an inventory, **not** a claim of feature parity. The user requested
 [AlistGo/alist](https://github.com/AlistGo/alist) as the reference. A shallow
 checkout was inspected at commit `92e745360766cce32564f94a468cb576f577d27e`
 (commit date 2026-10-21). Its license file is AGPL-3.0. Consult upstream
-notices and dependency licenses before importing code or distributing binaries;
-a local reference checkout is not included in this repository. Reinspect and
-pin a commit when updating this audit, since upstream changes.
+notices and dependency licenses before modifying or distributing binaries. The
+tracked source at this commit is now preserved as an isolated baseline in
+[`upstream/alist`](../../upstream/README.md); it is not wired into production.
+Reinspect and pin a commit when updating this audit, since upstream changes.
 
 ## What the reference contains
 
@@ -62,3 +63,19 @@ changes no longer redo the full sort. Sort direction is exposed using
 filter and direction invalidation, but does not measure real-browser latency,
 network speed or provider performance. A full visual redesign and upstream
 backend/driver integration remain future work.
+
+## Isolated Go baseline
+
+All 859 tracked backend files at the pinned commit are now included unchanged,
+including driver sources and the original AGPL license. A checksum manifest
+checks the imported baseline. A separate CI workflow attempts to compile this
+Go 1.25 module and smoke-test CLI help; see its result before assuming a build
+works. This does not integrate upstream drivers with Kova or establish provider
+compatibility. The upstream repository embeds only a placeholder frontend.
+The separate `AlistGo/alist-web` checkout inspected at commit
+`907756a8d5dff27d6b73036734de0a6533ace553` includes a `solid-router` submodule
+pinned to `f77b206e8592bb56d2d001e9488de5a54a13699b`; its package metadata
+says MIT but no license file was present at that revision. Its source and
+submodule have not been imported or audited for redistribution and compatibility.
+Keep all production deployments and data untouched while integration and
+migration are tested.
