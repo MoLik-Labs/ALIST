@@ -508,6 +508,94 @@ void test_catbox_public_manifest_driver() {
     CHECK(create_driver_instance("Dropbox") != nullptr);
 }
 
+void test_remote_copy_http_failure() {
+    std::string dir = "/tmp/alist_copy_http_" + random_hex(6);
+    std::filesystem::create_directories(dir + "/destination");
+    ScopeExit cleanup([&] { std::error_code ec; std::filesystem::remove_all(dir, ec); });
+    std::atomic<int> status{404};
+    HttpServer fake("127.0.0.1", 0, 2, 16);
+    fake.set_handler([&](HttpRequest&, HttpResponse& response) {
+        response.status = status.load();
+        response.body = response.status == 200 ? "actual-data" : "error-page";
+        if (response.status == 302) response.headers["Location"] = "/other";
+    });
+    CHECK(fake.start());
+    ScopeExit stop([&] { fake.stop(); });
+    AppConfig cfg;
+    cfg.load_or_create(dir + "/data");
+    cfg.allow_private_net_outbound = true;
+    Database db;
+    CHECK(db.init(cfg.db_file, cfg.jwt_secret));
+    VfsEngine vfs(db, cfg);
+    StorageRecord source;
+    source.mount_path = "/remote";
+    source.driver = "URLTree";
+    source.addition = JsonValue::object({{"url_structure", "/file|http://127.0.0.1:" + std::to_string(fake.bound_port()) + "/file|11"}}).dump();
+    CHECK(vfs.reload_storage(db.create_storage(source)));
+    StorageRecord destination;
+    destination.mount_path = "/local";
+    destination.driver = "Local";
+    destination.addition = JsonValue::object({{"root_folder_path", dir + "/destination"}}).dump();
+    CHECK(vfs.reload_storage(db.create_storage(destination)));
+    { std::ofstream file(dir + "/destination/file"); file << "original"; }
+    auto content = [&] { std::ifstream f(dir + "/destination/file"); return std::string(std::istreambuf_iterator<char>(f), {}); };
+    std::string error;
+    for (int code : {404, 403, 302, 500}) {
+        status = code;
+        CHECK(!vfs.copy_obj_sync("/remote/file", "/local", error));
+        CHECK(content() == "original");
+    }
+    status = 200;
+    CHECK(vfs.copy_obj_sync("/remote/file", "/local", error));
+    CHECK(content() == "actual-data");
+}
+
+void test_s3_list_pagination() {
+    std::atomic<int> mode{0};
+    std::atomic<int> requests{0};
+    std::atomic<bool> token_correct{false};
+    HttpServer fake("127.0.0.1", 0, 2, 16);
+    fake.set_handler([&](HttpRequest& req, HttpResponse& resp) {
+        ++requests;
+        auto it = req.query_params.find("continuation-token");
+        const bool next = it != req.query_params.end();
+        if (next && it->second == "a+b/=") token_correct = true;
+        if (mode == 1) { resp.body = "<ListBucketResult><IsTruncated>true</IsTruncated></ListBucketResult>"; return; }
+        if (mode == 2) { resp.body = "<ListBucketResult><IsTruncated>true</IsTruncated><NextContinuationToken>same</NextContinuationToken></ListBucketResult>"; return; }
+        if (mode == 3 && next) { resp.status = 503; return; }
+        if (mode == 4) { resp.body = "<Error><IsTruncated>false</IsTruncated></Error>"; return; }
+        if (next) {
+            resp.body = "<ListBucketResult><IsTruncated>false</IsTruncated><Contents><Key>second.txt</Key><Size>2</Size></Contents><CommonPrefixes><Prefix>folder/</Prefix></CommonPrefixes></ListBucketResult>";
+        } else {
+            resp.body = "<ListBucketResult><IsTruncated>true</IsTruncated><NextContinuationToken>a+b/=</NextContinuationToken><Contents><Key>first.txt</Key><Size>1</Size></Contents></ListBucketResult>";
+        }
+    });
+    CHECK(fake.start());
+    ScopeExit stop([&] { fake.stop(); });
+    auto driver = create_driver_instance("S3");
+    CHECK(driver != nullptr);
+    StorageRecord rec;
+    rec.addition = JsonValue::object({
+        {"bucket", "bucket"}, {"endpoint", "http://127.0.0.1:" + std::to_string(fake.bound_port())},
+        {"access_key_id", "test"}, {"secret_access_key", "test"}, {"allow_private_net", true}
+    }).dump();
+    std::string error;
+    CHECK(driver->init(rec, nullptr, error));
+    std::vector<FileObj> entries;
+    CHECK(driver->list("/", entries, error));
+    CHECK(requests == 2);
+    CHECK(token_correct.load());
+    CHECK(entries.size() == 3);
+    CHECK(entries[0].name == "first.txt" && entries[1].name == "folder" && entries[2].name == "second.txt");
+    for (int m : {1, 2, 3, 4}) {
+        mode = m;
+        requests = 0;
+        CHECK(!driver->list("/", entries, error));
+        CHECK(entries.size() == 3); // no partial listing published
+        CHECK(requests <= 2);
+    }
+}
+
 void test_s3_copy_response_integrity() {
     std::atomic<int> response_kind{0};
     std::atomic<int> deletes{0};
@@ -1385,6 +1473,8 @@ int main() {
     RUN_TEST(test_json_and_xml_bounds);
     RUN_TEST(test_database_vault_and_fts5);
     RUN_TEST(test_catbox_public_manifest_driver);
+    RUN_TEST(test_remote_copy_http_failure);
+    RUN_TEST(test_s3_list_pagination);
     RUN_TEST(test_s3_copy_response_integrity);
     RUN_TEST(test_local_upload_integrity);
     RUN_TEST(test_vfs_crypt_driver_and_loop_guard);
