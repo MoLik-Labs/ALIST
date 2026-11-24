@@ -7,6 +7,8 @@
 #include "alist/vfs.hpp"
 #include "alist/xml.hpp"
 
+#include <unordered_set>
+
 namespace alist {
 
 namespace {
@@ -144,69 +146,77 @@ public:
     }
 
     bool list(std::string_view subpath, std::vector<FileObj>& out, std::string& err_out) override {
-        auto clean = clean_vpath(subpath).value_or("/");
-        std::string prefix = to_s3_key(clean, true);
+        auto clean = clean_vpath(subpath);
+        if (!clean) { err_out = "Invalid S3 path"; return false; }
+        std::string prefix = to_s3_key(*clean, true);
         auto [host, uri] = build_bucket_root();
+        std::vector<FileObj> entries;
+        std::unordered_set<std::string> seen_tokens;
+        std::string token;
+        constexpr size_t max_entries = 100000;
+        constexpr size_t max_pages = 1000;
 
-        std::map<std::string, std::string> q = {
-            {"delimiter", "/"},
-            {"list-type", "2"},
-            {"max-keys",  "1000"},
-            {"prefix",    prefix},
-        };
-        std::string canonical_q;
-        for (const auto& [k, v] : q) {
-            if (!canonical_q.empty()) canonical_q.push_back('&');
-            canonical_q += url_encode(k) + "=" + url_encode(v);
+        for (size_t page = 0; page < max_pages; ++page) {
+            std::map<std::string, std::string> q = {
+                {"delimiter", "/"}, {"list-type", "2"}, {"max-keys", "1000"}, {"prefix", prefix},
+            };
+            if (!token.empty()) q["continuation-token"] = token;
+            std::string canonical_q;
+            for (const auto& [k, v] : q) {
+                if (!canonical_q.empty()) canonical_q.push_back('&');
+                canonical_q += url_encode(k) + "=" + url_encode(v);
+            }
+            auto hdrs = aws_sigv4_sign_headers(creds_, "GET", host, uri, canonical_q, sha256_hex(""), unix_now());
+            OutboundRequest req;
+            req.method = "GET";
+            req.url = scheme_ + "://" + host + uri + "?" + canonical_q;
+            req.headers = std::move(hdrs);
+            req.allow_private_net = allow_private_net_;
+            auto resp = HttpClient::instance().perform(req);
+            if (!resp.ok || resp.status_code != 200) {
+                err_out = resp.error.empty() ? ("S3 ListObjectsV2 HTTP " + std::to_string(resp.status_code)) : resp.error;
+                return false;
+            }
+            auto xml = parse_xml(resp.body, &err_out);
+            if (!xml || xml->local_name() != "ListBucketResult") {
+                err_out = "Invalid S3 listing response";
+                return false;
+            }
+            for (const auto* cp : xml->find_children("CommonPrefixes")) {
+                std::string p = cp->child_text("Prefix");
+                if (p.size() <= prefix.size() || !p.starts_with(prefix)) continue;
+                std::string name = p.substr(prefix.size());
+                if (!name.empty() && name.back() == '/') name.pop_back();
+                if (name.empty() || name.find('/') != std::string::npos) continue;
+                FileObj d;
+                d.name = std::move(name); d.is_dir = true; d.type = 1; d.modified = unix_now();
+                entries.push_back(std::move(d));
+            }
+            for (const auto* ct : xml->find_children("Contents")) {
+                std::string k = ct->child_text("Key");
+                if (k == prefix || k.size() <= prefix.size() || !k.starts_with(prefix)) continue;
+                std::string name = k.substr(prefix.size());
+                if (name.find('/') != std::string::npos) continue;
+                FileObj f;
+                f.name = std::move(name); f.is_dir = false;
+                f.size = parse_i64(ct->child_text("Size")).value_or(0);
+                f.etag = ct->child_text("ETag"); f.modified = unix_now();
+                f.type = classify_file_type(f.name, false);
+                entries.push_back(std::move(f));
+            }
+            if (entries.size() > max_entries) { err_out = "S3 listing exceeds entry limit"; return false; }
+            std::string flag = xml->child_text("IsTruncated");
+            auto truncated = trim_ascii(flag);
+            if (truncated == "false") { out = std::move(entries); return true; }
+            if (truncated != "true") { err_out = "Invalid S3 pagination flag"; return false; }
+            token = xml->child_text("NextContinuationToken");
+            if (token.empty() || token.size() > 8192 || !seen_tokens.insert(token).second) {
+                err_out = "Invalid or repeated S3 continuation token";
+                return false;
+            }
         }
-
-        std::string empty_hash = sha256_hex("");
-        auto hdrs = aws_sigv4_sign_headers(creds_, "GET", host, uri, canonical_q, empty_hash, unix_now());
-
-        OutboundRequest req;
-        req.method = "GET";
-        req.url = scheme_ + "://" + host + uri + "?" + canonical_q;
-        req.headers = std::move(hdrs);
-        req.allow_private_net = allow_private_net_;
-        auto resp = HttpClient::instance().perform(req);
-        if (!resp.ok || resp.status_code != 200) {
-            err_out = resp.error.empty() ? ("S3 ListObjectsV2 HTTP " + std::to_string(resp.status_code)) : resp.error;
-            return false;
-        }
-
-        auto xml = parse_xml(resp.body, &err_out);
-        if (!xml) return false;
-
-        out.clear();
-        for (const auto* cp : xml->find_children("CommonPrefixes")) {
-            std::string p = cp->child_text("Prefix");
-            if (p.size() <= prefix.size() || !p.starts_with(prefix)) continue;
-            std::string name = p.substr(prefix.size());
-            if (!name.empty() && name.back() == '/') name.pop_back();
-            if (name.empty() || name.find('/') != std::string::npos) continue;
-            FileObj d;
-            d.name = std::move(name);
-            d.is_dir = true;
-            d.type = 1;
-            d.modified = unix_now();
-            out.push_back(std::move(d));
-        }
-
-        for (const auto* ct : xml->find_children("Contents")) {
-            std::string k = ct->child_text("Key");
-            if (k == prefix || k.size() <= prefix.size() || !k.starts_with(prefix)) continue;
-            std::string name = k.substr(prefix.size());
-            if (name.find('/') != std::string::npos) continue;
-            FileObj f;
-            f.name = std::move(name);
-            f.is_dir = false;
-            f.size = parse_i64(ct->child_text("Size")).value_or(0);
-            f.etag = ct->child_text("ETag");
-            f.modified = unix_now();
-            f.type = classify_file_type(f.name, false);
-            out.push_back(std::move(f));
-        }
-        return true;
+        err_out = "S3 listing exceeds page limit";
+        return false;
     }
 
     std::optional<DownloadResolution> resolve_download(

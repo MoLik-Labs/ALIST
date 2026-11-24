@@ -775,7 +775,13 @@ bool VfsEngine::copy_obj_sync(std::string_view src_global_vpath, std::string_vie
     };
     auto resp = HttpClient::instance().perform(r);
     if (!resp.ok) { err_out = resp.error; return false; }
-    ::lseek(wfd.get(), 0, SEEK_SET);
+    // Transport success does not mean HTTP success. Never publish a 404/403
+    // error page or redirect body as the copied file (or delete the source).
+    if ((r.url.starts_with("http://") || r.url.starts_with("https://")) && resp.status_code != 200) {
+        err_out = "Source download failed with HTTP " + std::to_string(resp.status_code);
+        return false;
+    }
+    if (::lseek(wfd.get(), 0, SEEK_SET) < 0) { err_out = "Failed to rewind copy spool"; return false; }
     UploadStream up;
     up.filename = src_name;
     up.size = total_spooled;
