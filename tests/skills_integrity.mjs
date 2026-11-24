@@ -5,7 +5,7 @@ import path from 'node:path';
 
 const lock = JSON.parse(await readFile('skills/sources.lock.json', 'utf8'));
 assert.equal(lock.format, 1);
-assert.deepEqual(Object.keys(lock.sources).sort(), ['ecc', 'impeccable', 'superpowers', 'taste', 'ui-ux-pro-max', 'vercel-agent-skills']);
+assert.deepEqual(Object.keys(lock.sources).sort(), ['cc-skills-golang', 'ecc', 'impeccable', 'low-level-dev-skills', 'spf13-go-skills', 'superpowers', 'superpowers-marketplace', 'taste', 'ui-ux-pro-max', 'vercel-agent-skills']);
 for (const [name, source] of Object.entries(lock.sources)) {
   assert.match(source.commit, /^[0-9a-f]{40}$/);
   const root = path.join('skills', name);

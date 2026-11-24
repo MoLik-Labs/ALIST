@@ -1,0 +1,6 @@
+{
+  "name": "go-profiling",
+  "source": "./go-profiling",
+  "category": "development",
+  "tags": ["go", "profiling", "performance"]
+}
