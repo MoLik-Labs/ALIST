@@ -5,13 +5,15 @@ import path from 'node:path';
 
 const lock = JSON.parse(await readFile('skills/sources.lock.json', 'utf8'));
 assert.equal(lock.format, 1);
-assert.deepEqual(Object.keys(lock.sources).sort(), ['ecc', 'impeccable', 'superpowers', 'taste']);
+assert.deepEqual(Object.keys(lock.sources).sort(), ['cc-skills-golang', 'ecc', 'impeccable', 'low-level-dev-skills', 'spf13-go-skills', 'superpowers', 'superpowers-marketplace', 'taste', 'ui-ux-pro-max', 'vercel-agent-skills']);
 for (const [name, source] of Object.entries(lock.sources)) {
   assert.match(source.commit, /^[0-9a-f]{40}$/);
   const root = path.join('skills', name);
   async function filesAt(dir, prefix = '') {
     const result = [];
     for (const entry of await readdir(dir, { withFileTypes: true })) {
+      // Python's ignored bytecode cache is generated when using the search tool.
+      if (entry.name === '__pycache__' && entry.isDirectory()) continue;
       const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
       const full = path.join(dir, entry.name);
       const stat = await lstat(full);
@@ -22,7 +24,7 @@ for (const [name, source] of Object.entries(lock.sources)) {
     }
     return result;
   }
-  const supplemental = new Set(['LICENSE', ...(name === 'impeccable' ? ['NOTICE.md'] : [])]);
+  const supplemental = new Set(name === 'vercel-agent-skills' ? ['README.md'] : ['LICENSE', ...(name === 'impeccable' ? ['NOTICE.md'] : [])]);
   const actual = (await filesAt(root)).filter(file => !supplemental.has(file)).sort();
   const expected = Object.keys(source.files).sort();
   assert.deepEqual(actual, expected, `${name}: snapshot file list differs from lock`);

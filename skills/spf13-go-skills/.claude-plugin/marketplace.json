@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "go-skills",
+  "owner": {
+    "name": "Steve Francia",
+    "email": "steve.francia@gmail.com"
+  },
+  "description": "Authoritative Go skills for Claude Code — written by spf13 (creator of Cobra, Viper, Hugo). Covers idiomatic Go, CLI architecture, spec review, release engineering, desktop apps, file operations, and testable filesystems.",
+  "plugins": [
+    {
+      "name": "go",
+      "source": "./go",
+      "category": "languages",
+      "tags": ["go", "golang", "idiomatic", "patterns", "concurrency", "testing"]
+    },
+    {
+      "name": "cobra-viper",
+      "source": "./cobra-viper",
+      "category": "languages",
+      "tags": ["go", "golang", "cli", "cobra", "viper", "configuration"]
+    },
+    {
+      "name": "go-spec-reviewer",
+      "source": "./go-spec-reviewer",
+      "category": "development",
+      "tags": ["go", "golang", "spec", "review", "design"]
+    },
+    {
+      "name": "go-release",
+      "source": "./go-release",
+      "category": "development",
+      "tags": ["go", "golang", "release", "semver", "goreleaser"]
+    },
+    {
+      "name": "wails",
+      "source": "./wails",
+      "category": "frameworks",
+      "tags": ["go", "wails", "desktop", "gui", "webview"]
+    },
+    {
+      "name": "fileflow-pathologize",
+      "source": "./fileflow-pathologize",
+      "category": "development",
+      "tags": ["go", "golang", "files", "fileflow", "pathologize"]
+    },
+    {
+      "name": "afero",
+      "source": "./afero",
+      "category": "development",
+      "tags": ["go", "golang", "files", "afero", "testing"]
+    }
+  ]
+}

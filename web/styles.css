@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Kova Design System — tasteskill 2.5 discipline + refined optical blur
+   Kova workspace design system — clear navigation and focused work surfaces
    One spacing scale (4/8/12/16/24/32/48/64), one radius family (6/10/14),
    93% neutral surfaces, one non-violet Signal Cobalt accent, WCAG AA+ contrast,
    GPU-only transform/opacity motion, zero horizontal spill from 320px to 4K.
@@ -26,7 +26,7 @@
 
   /* Layout rhythm */
   --nav-h: 60px;
-  --rail-w: 236px;
+  --rail-w: 248px;
 
   /* Typography */
   --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", sans-serif;
@@ -47,7 +47,7 @@
   --m-slide: 240ms;
 
   /* Light palette: architectural stone + Signal Cobalt (OKLCH ~254 deg, zero violet) */
-  --bg: #f3f5f7;
+  --bg: #f2f5f8;
   --surface: #ffffff;
   --surface-2: #edf0f4;
   --surface-3: #e2e7ee;
@@ -76,7 +76,7 @@
   /* Optical frosted glass layers */
   --glass: rgba(255, 255, 255, 0.74);
   --glass-elevated: rgba(255, 255, 255, 0.82);
-  --glass-rail: rgba(246, 248, 251, 0.7);
+  --glass-rail: #eaf0f7;
   --glass-scrim: rgba(11, 16, 23, 0.34);
   --glass-shine: inset 0 1px 0 rgba(255, 255, 255, 0.78);
   --blur-chrome: saturate(180%) blur(20px);
@@ -114,7 +114,7 @@
     --danger-soft: rgba(242, 109, 109, 0.13);
     --glass: rgba(16, 22, 30, 0.73);
     --glass-elevated: rgba(20, 27, 37, 0.8);
-    --glass-rail: rgba(13, 18, 25, 0.68);
+    --glass-rail: #101c2a;
     --glass-scrim: rgba(3, 6, 10, 0.56);
     --glass-shine: inset 0 1px 0 rgba(255, 255, 255, 0.065);
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.28), 0 10px 28px rgba(0, 0, 0, 0.22);
@@ -149,7 +149,7 @@
   --danger-soft: rgba(242, 109, 109, 0.13);
   --glass: rgba(16, 22, 30, 0.73);
   --glass-elevated: rgba(20, 27, 37, 0.8);
-  --glass-rail: rgba(13, 18, 25, 0.68);
+  --glass-rail: #101c2a;
   --glass-scrim: rgba(3, 6, 10, 0.56);
   --glass-shine: inset 0 1px 0 rgba(255, 255, 255, 0.065);
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.28), 0 10px 28px rgba(0, 0, 0, 0.22);
@@ -349,11 +349,8 @@ svg {
   align-items: center;
   gap: var(--s-4);
   padding: 0 var(--s-5);
-  background: var(--glass);
-  -webkit-backdrop-filter: var(--blur-chrome);
-  backdrop-filter: var(--blur-chrome);
+  background: var(--surface);
   border-bottom: 1px solid var(--line);
-  box-shadow: var(--glass-shine);
 }
 
 .topbar-left {
@@ -493,8 +490,6 @@ svg {
   display: flex;
   flex-direction: column;
   background: var(--glass-rail);
-  -webkit-backdrop-filter: var(--blur-chrome);
-  backdrop-filter: var(--blur-chrome);
   border-right: 1px solid var(--line);
   overflow: hidden;
 }
@@ -542,6 +537,7 @@ svg {
 .nav-item.is-active {
   background: var(--action-soft);
   color: var(--action);
+  box-shadow: inset 3px 0 0 var(--action);
   font-weight: 600;
 }
 .nav-item-label {
@@ -618,6 +614,7 @@ svg {
   padding: var(--s-5) clamp(var(--s-4), 3vw, var(--s-6)) var(--s-8);
   outline: none;
 }
+.main-stage:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -4px; }
 
 .view-section {
   max-width: 1280px;
@@ -678,6 +675,10 @@ svg {
   justify-content: space-between;
   gap: var(--s-3);
   flex-wrap: wrap;
+  padding: var(--s-3) var(--s-4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
 }
 
 .crumbs {
@@ -850,8 +851,8 @@ svg {
 .file-table thead th {
   background: var(--surface-2);
   font-size: var(--t-label);
-  font-weight: 550;
-  color: var(--muted);
+  font-weight: 600;
+  color: var(--ink-2);
   white-space: nowrap;
   user-select: none;
 }
@@ -1920,6 +1921,7 @@ textarea.input {
     box-shadow: var(--shadow-float);
   }
   .sidebar.is-open { transform: translateX(0); }
+  .sidebar { background: var(--glass-rail); }
   .col-date { display: none; }
 }
 
@@ -1933,7 +1935,9 @@ textarea.input {
   .cmd-trigger { height: 42px; padding: 0 10px; }
   .brand-name { max-width: 112px; font-size: 0.98rem; }
   .form-grid, .kbd-table { grid-template-columns: 1fr; }
-  .filter-box { flex: 1; }
+  .explorer-bar { padding: var(--s-3); }
+  .explorer-tools { width: 100%; }
+  .filter-box { flex: 1; min-width: 0; }
   .filter-input { width: 100%; height: 42px; }
   .col-size { display: none; }
   .col-ops { width: 56px; }

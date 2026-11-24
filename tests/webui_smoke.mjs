@@ -132,6 +132,18 @@ async function testExplorerAndAdmin() {
   const { document } = window;
   await eventually(() => document.querySelectorAll('#explorerContent tbody tr').length === 160, 'Explorer did not render the initial virtualized window');
   assert.ok(document.querySelector('[data-act="load-more"]'), 'large listings must expose progressive loading');
+  assert.equal(document.querySelectorAll('#sidebarContent [aria-current="page"]').length, 1, 'only one current navigation item');
+  window.innerWidth = 600;
+  window.dispatchEvent(new window.Event('resize'));
+  assert.ok(document.getElementById('appSidebar').hasAttribute('inert'), 'closed mobile navigation is not keyboard reachable');
+  document.getElementById('btnMobileNav').click();
+  assert.ok(!document.getElementById('appSidebar').hasAttribute('inert'));
+  document.getElementById('btnMobileNav').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  assert.ok(document.getElementById('appSidebar').hasAttribute('inert'));
+  assert.equal(document.activeElement, document.getElementById('btnMobileNav'));
+  window.innerWidth = 1200;
+  window.dispatchEvent(new window.Event('resize'));
+  assert.ok(!document.getElementById('appSidebar').hasAttribute('inert'), 'desktop navigation remains available');
   const initialSorts = collatorCount();
   document.querySelector('[data-act="load-more"]').click();
   await eventually(() => document.querySelectorAll('#explorerContent tbody tr').length === 320, 'Load more did not expand the rendered window');
@@ -175,6 +187,19 @@ async function testExplorerAndAdmin() {
   assert.ok(calls.some(call => call.path === '/api/fs/search'), 'command palette should query FTS search');
   document.getElementById('paletteInput').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   assert.equal(document.getElementById('paletteOverlay').hidden, true);
+
+  // Search opened from a keyboard shortcut returns focus and contains Tab.
+  filter.focus();
+  filter.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true, cancelable: true }));
+  await eventually(() => document.activeElement === document.getElementById('paletteInput'), 'Palette should focus search');
+  const first = document.getElementById('paletteInput');
+  const last = document.querySelector('#paletteResults button:last-child');
+  first.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }));
+  assert.equal(document.activeElement, last, 'Shift+Tab should wrap inside the palette');
+  last.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+  assert.equal(document.activeElement, first, 'Tab should wrap inside the palette');
+  first.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  assert.equal(document.activeElement, filter, 'Closing palette should restore the initiating focus');
 
   document.getElementById('btnTopAdmin').click();
   await eventually(() => !document.getElementById('adminView').hidden, 'Admin view did not open');

@@ -13,3 +13,9 @@
 Local uploads with a declared size are rejected if the stream ends early or exceeds that size; the existing target is retained on these failures. File data is synced before the temporary file is renamed, but this is not a guarantee against power loss and does not replace backups. S3 server-side copy requires a valid `CopyObjectResult` with an ETag before reporting success; providers that do not return that standard result may be rejected. These checks do not verify the destination bytes or make a cross-storage move atomic. Test with disposable data on your provider.
 
 S3 listings fetch continuation pages up to 100,000 entries or 1,000 pages; invalid pagination or a later-page failure causes the listing to fail rather than silently return a partial result. Copying from an HTTP source requires a complete HTTP 200 response; redirects and error pages are rejected. These checks have been tested against local mock servers, not real S3-compatible providers.
+
+S3 object lookup now distinguishes an existing file, a folder marker and a
+prefix with children from an absent path. A denied HEAD or failed listing is
+reported as an error rather than silently treated as an existing folder. This
+has been exercised against a local mock; compatibility with each provider still
+requires isolated testing.

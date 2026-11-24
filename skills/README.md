@@ -75,3 +75,45 @@ sandbox's network; its detector and engine-dependent commands are not verified.
 Refer to the relevant skill text directly until that engine is available. Cloned
 source files and tests are available; this is not proof that every upstream
 script or optional feature runs here.
+
+## Additional design and Vercel skills
+
+- [`ui-ux-pro-max/`](ui-ux-pro-max/SKILL.md): UI/UX Pro Max skill, data,
+  references and search scripts from `nextlevelbuilder/ui-ux-pro-max-skill`
+  at `a4fc248f6136552cb881e298847abc7ddce84e6b`; upstream MIT license is
+  preserved.
+- [`vercel-agent-skills/skills/`](vercel-agent-skills/skills/): skill folders
+  from `vercel-labs/agent-skills` at
+  `5a37a6329fbad3666c3207392a6a7c0110e92efb`; upstream README declares MIT.
+  These include stack-specific and deployment instructions; they are references,
+  not permission to deploy or transmit credentials. Distribution archives are
+  omitted because their source folders are included.
+
+`AGENTS.md` points future repository-aware agents to this workflow. A new chat
+may not automatically read that file or register these skills; automatic use
+depends on the agent runtime. The snapshots and local integrity check do not
+install or execute plugins, hooks or commands.
+
+## Additional engineering skill snapshots
+
+Complete tracked source snapshots are included for these repositories. Their
+original MIT licenses remain in each directory, and the local lock records the
+commit and file hashes. They are reference material, not runtime dependencies.
+
+| Source | Local snapshot | Pinned commit |
+| --- | --- | --- |
+| [Superpowers Marketplace](https://github.com/obra/superpowers-marketplace) | [`superpowers-marketplace/`](superpowers-marketplace/) | `808dc47aad045c1cc1181c96e5fbae101461f69f` |
+| [Low-level dev skills](https://github.com/mohitmishra786/low-level-dev-skills) | [`low-level-dev-skills/`](low-level-dev-skills/skills/) | `18f29518a47fda070e6ec1268cb577692fae9a10` |
+| [spf13 Go skills](https://github.com/spf13/go-skills) | [`spf13-go-skills/`](spf13-go-skills/go/SKILL.md) | `383c2f8916313b7f1260a6d15d92a468e4ecc89e` |
+| [samber Go skills](https://github.com/samber/cc-skills-golang) | [`cc-skills-golang/`](cc-skills-golang/skills/) | `d68d80aec298e1b74b37c2a472c002b5217248b3` |
+
+The marketplace snapshot contains a catalog, not all of its separately hosted
+plugins. The core Superpowers skills are already separately pinned under
+`superpowers/`; the other listed plugins, MCP servers, browser integrations,
+background hooks and cross-session memory are **not installed or activated**.
+No installers, network operations or instructions inside a snapshot run
+automatically. Git-backed guidance can be read in later sessions, but whether
+a future agent reads `AGENTS.md` or activates any skill is controlled by that
+agent's environment. Evaluate guidance against Kova's supported Go versions,
+security, data safety and measured performance; a skill or optimization claim
+is not evidence of compatibility or faster execution.
