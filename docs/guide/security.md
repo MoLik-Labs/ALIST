@@ -19,3 +19,11 @@ prefix with children from an absent path. A denied HEAD or failed listing is
 reported as an error rather than silently treated as an existing folder. This
 has been exercised against a local mock; compatibility with each provider still
 requires isolated testing.
+
+## Experimental read-only MCP endpoint
+
+The native server has an **opt-in, experimental** stateless MCP JSON-RPC endpoint at `POST /api/mcp`. Set `ALIST_ENABLE_MCP=true` and restart to enable it. This environment variable is not persisted in `config.json`. Use HTTPS via a trusted reverse proxy and protect your login token as a password; avoid admin or system tokens. Create a dedicated user with a restricted base path and grant the MCP access permission only on the required role scopes. Authenticate with `Authorization: Bearer <login-token>`; guests cannot use MCP.
+
+Supported protocol version: `2025-03-26`. The endpoint implements `initialize`, `ping`, `tools/list`, and `tools/call` for metadata-only `fs_list` and `fs_get`. Paths are absolute **within the user's base path**. `fs_list` returns up to 50 entries per page, using the optional `page` argument. Entries also require MCP permission and normal read visibility. Password-protected metadata paths, including inherited passwords even when a nearer metadata record exists, are excluded for administrators and roles with password bypass; no password can be supplied through MCP. No downloads, raw URLs, write tools, stdio, SSE, sessions, OAuth, or upstream tool parity are implemented. Directory loading and filtering still depend on the underlying driver and can process more than one page internally.
+
+Requests with an `Origin` header are rejected, including same-origin browser clients; no CORS access is granted. Non-browser clients must omit `Origin`. Request bodies are limited to 64 KiB at the endpoint (the HTTP server may buffer a request before this check). GET returns 405; server push is unavailable. A disposable local HTTP smoke test exercises initialize and both tools using the official Python MCP SDK 1.30.0; other clients, HTTPS proxies and production deployments have not been verified. Disable the variable if the endpoint is not needed.

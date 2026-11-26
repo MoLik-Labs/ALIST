@@ -995,6 +995,13 @@ void test_live_http_api_webdav_and_concurrency() {
     vfs.reload_all_storages();
     TaskManager tasks(vfs, 2);
     ApiRouter router(cfg, db, vfs, tasks);
+    HttpRequest disabled_mcp;
+    disabled_mcp.path = "/api/mcp";
+    disabled_mcp.method = "POST";
+    HttpResponse disabled_response;
+    router.dispatch(disabled_mcp, disabled_response);
+    CHECK(disabled_response.status == 404);
+    cfg.enable_mcp = true;
 
     HttpServer server("127.0.0.1", 0, 4, 256);
     server.set_stream_predicate([&](const HttpRequest& r) { return router.should_stream_request_body(r); });
@@ -1232,6 +1239,59 @@ void test_live_http_api_webdav_and_concurrency() {
     CHECK(login_json && login_json->get("code").as_i64() == 200);
     std::string admin_jwt = login_json->get("data").get("token").as_str();
     CHECK(!admin_jwt.empty());
+
+    // MCP is opt-in, authenticated, non-browser, scoped and read-only.
+    auto mcp = [&](const std::string& token, const std::string& body, const std::string& extra = "") {
+        return raw_http_call(port, "POST /api/mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nAuthorization: Bearer " + token +
+            "\r\n" + extra + "Content-Length: " + std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" + body);
+    };
+    std::string init_mcp = R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1"}}})";
+    CHECK(mcp("", init_mcp).status == 401);
+    auto origin_mcp = mcp(admin_jwt, init_mcp, "Origin: https://evil.example\r\n");
+    CHECK(origin_mcp.status == 403);
+    CHECK(origin_mcp.headers.count("access-control-allow-origin") == 0);
+    auto initialized = mcp(admin_jwt, init_mcp);
+    CHECK(initialized.status == 200);
+    CHECK(JsonValue::parse(initialized.body)->get("result").get("protocolVersion").as_str() == "2025-03-26");
+    CHECK(mcp(admin_jwt, "{").body.find("-32700") != std::string::npos);
+    auto mcp_list = R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fs_list","arguments":{"path":"/local"}}})";
+    auto admin_listing = mcp(admin_jwt, mcp_list);
+    CHECK(admin_listing.body.find("alice_home") != std::string::npos);
+    CHECK(admin_listing.body.find("secret_vault") == std::string::npos);
+    auto denied_secret = mcp(admin_jwt, R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"fs_get","arguments":{"path":"/local/secret_vault/confidential.txt"}}})");
+    CHECK(denied_secret.body.find("isError\":true") != std::string::npos);
+    MetaRecord nested_meta;
+    nested_meta.path = "/local/secret_vault/confidential.txt";
+    nested_meta.readme = "Nested metadata must not override inherited MCP protection";
+    auto nested_meta_id = db.create_meta(nested_meta);
+    CHECK(nested_meta_id > 0);
+    auto nested_denied = mcp(admin_jwt, R"({"jsonrpc":"2.0","id":33,"method":"tools/call","params":{"name":"fs_get","arguments":{"path":"/local/secret_vault/confidential.txt"}}})");
+    CHECK(nested_denied.body.find("isError\":true") != std::string::npos);
+    CHECK(db.delete_meta(nested_meta_id));
+    CHECK(mcp(admin_jwt, R"({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"fs_delete","arguments":{"path":"/local"}}})").body.find("-32602") != std::string::npos);
+    RoleRecord mcp_role;
+    mcp_role.name = "mcp-scoped-test";
+    mcp_role.scopes = {{.path = "/local/alice_home", .permission = (1 << PermMCPAccess)}};
+    auto mcp_role_id = db.create_role(mcp_role);
+    CHECK(mcp_role_id > 0);
+    UserRecord mcp_user;
+    mcp_user.username = "mcp-test";
+    mcp_user.password_hash = hash_password_pbkdf2("McpTestPassword!");
+    mcp_user.base_path = "/local/alice_home";
+    mcp_user.role_ids = {mcp_role_id};
+    CHECK(db.create_user(mcp_user) > 0);
+    std::string mcp_login = R"({"username":"mcp-test","password":"McpTestPassword!"})";
+    auto mcp_login_res = raw_http_call(port, "POST /api/auth/login HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(mcp_login.size()) + "\r\nConnection: close\r\n\r\n" + mcp_login);
+    auto mcp_jwt = JsonValue::parse(mcp_login_res.body)->get("data").get("token").as_str();
+    CHECK(!mcp_jwt.empty());
+    auto scoped_list = mcp(mcp_jwt, R"({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"fs_list","arguments":{"path":"/"}}})");
+    CHECK(scoped_list.body.find("xss.html") != std::string::npos);
+    auto escaped = mcp(mcp_jwt, R"({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"fs_get","arguments":{"path":"/../secret_vault/confidential.txt"}}})");
+    CHECK(escaped.body.find("isError\":true") != std::string::npos);
+    mcp_role.id = mcp_role_id;
+    mcp_role.scopes[0].permission = 0;
+    CHECK(db.update_role(mcp_role));
+    CHECK(mcp(mcp_jwt, R"({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"fs_list","arguments":{"path":"/"}}})").body.find("isError\":true") != std::string::npos);
 
     std::string huge_page_body = R"({"path":"/local","page":9223372036854775807,"per_page":9223372036854775807})";
     auto huge_page = raw_http_call(port,

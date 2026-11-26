@@ -429,7 +429,119 @@ void ApiRouter::handle_share_download(HttpRequest& req, HttpResponse& resp, bool
     WebDavServer::serve_resolution(req, resp, *dl, force_proxy, true);
 }
 
+// Experimental stateless MCP 2025-03-26 over HTTP, deliberately limited to
+// read-only metadata. It does not expose raw URLs, contents or mutations.
+void ApiRouter::handle_mcp(HttpRequest& req, HttpResponse& resp) {
+    resp.headers["Cache-Control"] = "no-store";
+    resp.headers["X-Content-Type-Options"] = "nosniff";
+    if (!cfg_.enable_mcp) { resp.status = 404; return; }
+    // Do not expose bearer-authenticated MCP to browser origins. Non-browser
+    // clients must omit Origin; deploy behind TLS and a trusted proxy.
+    if (!req.header("origin").empty()) { resp.status = 403; return; }
+    if (req.method != "POST") { resp.status = 405; resp.headers["Allow"] = "POST"; return; }
+    if (!to_lower_ascii(req.header("content-type")).starts_with("application/json")) { resp.status = 415; return; }
+    if (req.body.size() > 65536) { resp.status = 413; return; }
+    auto auth = authenticate(req, resp, false);
+    if (!auth) { resp.status = 401; return; }
+    const auto& user = auth->user;
+    if (user.is_guest()) { resp.status = 403; return; }
+
+    auto send_error = [&](const JsonValue& id, int code, std::string_view message) {
+        resp.set_json(200, JsonValue::object({{"jsonrpc", "2.0"}, {"id", id},
+            {"error", JsonValue::object({{"code", code}, {"message", std::string(message)}})}}).dump());
+    };
+    auto parsed = JsonValue::parse(req.body);
+    if (!parsed) { send_error(nullptr, -32700, "Parse error"); return; }
+    const auto& j = *parsed;
+    if (!j.is_object() || j.get("jsonrpc").as_sv() != "2.0" || !j.get("method").is_string()) {
+        send_error(nullptr, -32600, "Invalid request"); return;
+    }
+    bool has_id = j.contains("id");
+    const auto& id = j.get("id");
+    if (has_id && !(id.is_string() || id.is_int())) { send_error(nullptr, -32600, "Invalid request id"); return; }
+    if (!has_id) { resp.status = 202; return; }
+    auto send_result = [&](JsonValue result) {
+        resp.set_json(200, JsonValue::object({{"jsonrpc", "2.0"}, {"id", id}, {"result", std::move(result)}}).dump());
+    };
+    auto tool_result = [&](const JsonValue& value, bool error = false) {
+        return JsonValue::object({{"content", JsonValue::array({JsonValue::object({{"type", "text"}, {"text", value.dump()}})})}, {"isError", error}});
+    };
+    const std::string method = j.get("method").as_str();
+    if (method == "initialize") {
+        send_result(JsonValue::object({{"protocolVersion", "2025-03-26"},
+            {"capabilities", JsonValue::object({{"tools", JsonValue::object({{"listChanged", false}})}})},
+            {"serverInfo", JsonValue::object({{"name", "kova-readonly"}, {"version", kVersion}})}}));
+        return;
+    }
+    if (method == "ping") { send_result(JsonValue::object()); return; }
+    if (method == "tools/list") {
+        auto schema = JsonValue::object({{"type", "object"},
+            {"properties", JsonValue::object({{"path", JsonValue::object({{"type", "string"}, {"description", "Absolute path within the user base"}})},
+                {"page", JsonValue::object({{"type", "integer"}, {"minimum", 1}})}})},
+            {"required", JsonValue::array({"path"})}, {"additionalProperties", false}});
+        send_result(JsonValue::object({{"tools", JsonValue::array({
+            JsonValue::object({{"name", "fs_list"}, {"description", "List visible entries in a directory, up to 50 per page"}, {"inputSchema", schema}}),
+            JsonValue::object({{"name", "fs_get"}, {"description", "Read metadata of one visible file or directory"}, {"inputSchema", schema}})
+        })}}));
+        return;
+    }
+    if (method != "tools/call") { send_error(id, -32601, "Method not found"); return; }
+    const auto& params = j.get("params");
+    const auto& args = params.get("arguments");
+    const std::string name = params.get("name").as_str();
+    if (!params.is_object() || !args.is_object() || (name != "fs_list" && name != "fs_get") ||
+        !args.get("path").is_string() || args.get("path").as_sv().empty() ||
+        args.get("path").as_sv().front() != '/' || args.get("path").size() > 4096 ||
+        (args.contains("page") && (!args.get("page").is_int() || args.get("page").as_i64() < 1 || args.get("page").as_i64() > 1000000))) {
+        send_error(id, -32602, "Invalid tool arguments"); return;
+    }
+    for (const auto& [key, _] : args.as_object()) {
+        if (key != "path" && key != "page") { send_error(id, -32602, "Invalid tool arguments"); return; }
+    }
+    auto path = vfs_.resolve_user_path(user, args.get("path").as_sv());
+    // MCP deliberately treats any inherited password as a barrier, even if a
+    // closer metadata record has no password. Snapshot once per request so
+    // checking every listed child does not repeatedly copy the metadata cache.
+    const auto metas = db_.list_metas();
+    auto protected_by_password = [&](std::string_view target) {
+        for (const auto& meta : metas) {
+            if (!meta.password.empty() &&
+                (meta.path == target || (meta.p_sub && is_subpath(meta.path, target)))) return true;
+        }
+        return false;
+    };
+    if (!path || !has_perm(vfs_.effective_permissions(user, *path), PermMCPAccess) || protected_by_password(*path)) {
+        send_result(tool_result(JsonValue::object({{"error", "MCP access denied"}}), true)); return;
+    }
+    auto metadata = [](const FileObj& entry) {
+        return JsonValue::object({{"name", entry.name}, {"size", entry.size},
+            {"is_dir", entry.is_dir}, {"modified", entry.format_iso8601_str()}, {"type", entry.type}});
+    };
+    if (name == "fs_list") {
+        auto listing = vfs_.list_dir(&user, *path, "", false);
+        if (!listing.ok) { send_result(tool_result(JsonValue::object({{"error", "Directory unavailable or access denied"}}), true)); return; }
+        JsonValue content = JsonValue::array();
+        size_t page = static_cast<size_t>(args.get("page").as_i64(1));
+        size_t start = (page - 1) * size_t{50};
+        size_t total = 0;
+        for (const auto& entry : listing.entries) {
+            auto child = join_vpath(*path, entry.name);
+            if (!child || protected_by_password(*child) || !has_perm(vfs_.effective_permissions(user, *child), PermMCPAccess) ||
+                !vfs_.can_read_path(user, *child, "")) continue;
+            if (total >= start && total - start < 50) content.push_back(metadata(entry));
+            ++total;
+        }
+        send_result(tool_result(JsonValue::object({{"content", std::move(content)},
+            {"page", static_cast<int64_t>(page)}, {"total", static_cast<int64_t>(total)}})));
+        return;
+    }
+    auto obj = vfs_.get_obj(&user, *path, "", "");
+    if (!obj.ok) { send_result(tool_result(JsonValue::object({{"error", "Object unavailable or access denied"}}), true)); return; }
+    send_result(tool_result(metadata(obj.entry)));
+}
+
 void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
+    if (req.path == "/api/mcp") { handle_mcp(req, resp); return; }
     // Global CORS headers (supports live preview hosts and cross-origin WebDAV/API clients)
     std::string origin = req.header("origin");
     if (origin.empty()) {

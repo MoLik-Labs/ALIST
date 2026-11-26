@@ -188,6 +188,12 @@ jobs:
           fi
           exit "$status"
 
+      - name: Test official MCP Python SDK against local Kova
+        run: |
+          python3 -m venv "$RUNNER_TEMP/kova-mcp-venv"
+          "$RUNNER_TEMP/kova-mcp-venv/bin/pip" install 'mcp==1.30.0'
+          "$RUNNER_TEMP/kova-mcp-venv/bin/python" tests/mcp_sdk_integration.py ./alist
+
       - name: Test pinned NodeWarden WebDAV uploader against local Kova
         run: |
           mkdir -p /tmp/kova-nodewarden-source
