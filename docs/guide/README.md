@@ -1,11 +1,15 @@
 # Kova documentation site
 
-This site uses the default theme and localization system from
-[VitePress](https://github.com/vuejs/vitepress) (MIT license), customized for
-Kova. Content is in English at the root and Vietnamese in `vi/`. The old
-`docs/site` is a separate legacy static site and is not the source for this one.
+The source of truth is the English Markdown in this directory and the
+Vietnamese Markdown in `vi/`. The static site uses Astro and Starlight, with
+self-hosted Pagefind search. Starlight and Nimbus are independent Astro docs
+frameworks; this implementation uses Starlight and draws on Nimbus's emphasis
+on repo-owned content and validation, not Nimbus's backend features. The old
+`docs/site` is a separate legacy site.
 
-## Develop and build
+## Build locally
+
+Use Node.js 22.23.4 or later.
 
 ```sh
 npm ci --ignore-scripts
@@ -14,31 +18,28 @@ npm run docs:build
 npm run test:docs-build
 ```
 
-The development server binds to loopback and is not a production server. The
-pinned VitePress 1.6.4 dependency currently brings development-server advisories
-in Vite/esbuild; do not expose the dev server to untrusted networks. The built
-site is static and does not include a Vite server. Check `npm audit` and update
-when a supported stable release addresses these advisories.
+The content generation script mirrors the Markdown into an ignored Starlight
+content directory, adds frontmatter and maps warnings to Starlight asides.
+Edit `docs/guide`, not the generated files. The development server binds to
+loopback and is not a production server. Astro telemetry is disabled by the
+command wrapper. Local search is generated at build time. Review dependency
+advisories with `npm audit` and keep dependencies up to date.
 
 ## GitHub Pages
 
-1. In your fork's GitHub **Settings → Pages**, choose **GitHub Actions** as the
-   source. The repository/account must permit Pages and Actions.
-2. Push a change to `BETA` or `main` or run **Deploy documentation to GitHub
-   Pages** from the Actions tab. Approve any environment protection rules.
-3. The workflow builds `docs/guide/.vitepress/dist` and publishes it as a Pages
-   artifact. The URL is shown by the deployment and depends on your account.
-4. For `<owner>.github.io/<repository>/`, the workflow detects the repository
-   name and builds with that base. For an account site `<owner>.github.io` it
-   uses `/`. For a custom domain or other base path, add the repository Actions
-   variable `DOCS_BASE` under **Settings → Secrets and variables → Actions →
-   Variables** (for example `/` or `/manual/`), then rerun the workflow. It
-   must begin and end with `/`. Remove the variable to restore automatic base
-   detection. For local builds, set the `DOCS_BASE` environment variable instead.
-   No absolute URLs to the original repository's Pages hostname are required.
-5. Open both languages, follow the internal links and test on mobile. This site
-   hosts documentation only; it does not deploy or run the Kova server.
+1. In your fork, choose **Settings → Pages → GitHub Actions** as the source.
+   Actions and Pages must be permitted; approve environment rules if applicable.
+2. Push documentation changes to `BETA` or `main`, or run **Deploy documentation
+   to GitHub Pages** from Actions using the branch with this workflow.
+3. The workflow builds and publishes `docs/starlight/dist`. Open the URL from
+   the deployment, switch languages and check navigation, search and old links.
+4. A project site automatically uses `/<repository>/`; an account site uses `/`.
+   Override with an Actions variable `DOCS_BASE`, for example `/` for a custom
+   domain or `/manual/` for a subdirectory. It must start and end with `/`.
+   `DOCS_REPOSITORY` may be set to `owner/repository` to choose the GitHub
+   link; otherwise the workflow uses its fork's `GITHUB_REPOSITORY`.
 
-Publishing requires repository settings and permissions outside this project;
-the workflow alone does not enable Pages. Deployment has not been tested on a
-live GitHub Pages account.
+The build creates static redirects from old `.html` page URLs; JavaScript preserves query strings and fragments, with a plain link and meta refresh as a fallback. The site serves
+public documentation only; it cannot run the Kova API or store your files.
+For Cloudflare docs, create a separate static project: do not overwrite the
+existing application Worker. See the bilingual Publish documentation page.

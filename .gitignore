@@ -62,3 +62,8 @@ __pycache__/
 # Local skill reference clones (tracked snapshots are under skills/)
 /.cache/skills/
 /.cache/kova-preview-data/
+
+# Generated Starlight documentation and content mirrors
+/docs/starlight/.astro/
+/docs/starlight/dist/
+/docs/starlight/src/content/docs/
