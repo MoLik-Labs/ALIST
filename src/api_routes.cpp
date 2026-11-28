@@ -5,6 +5,7 @@
 #include "alist/json.hpp"
 #include "alist/http_client.hpp"
 #include "alist/version.hpp"
+#include "alist/virustotal.hpp"
 #include "alist/web_ui.hpp"
 
 #include <algorithm>
@@ -1406,6 +1407,46 @@ void ApiRouter::dispatch(HttpRequest& req, HttpResponse& resp) {
             JsonValue arr = JsonValue::array();
             for (const auto& d : get_registered_drivers()) arr.push_back(d.name);
             json_ok(resp, std::move(arr));
+            return;
+        }
+
+        // Explicit admin-initiated hash lookup only: never upload files or URLs.
+        if (req.path == "/api/admin/security/virustotal" && req.method == "POST") {
+            resp.headers["Cache-Control"] = "no-store";
+            const auto& key = cfg_.virustotal_api_key;
+            if (key.size() < 16 || key.size() > 128 || !std::all_of(key.begin(), key.end(), [](unsigned char c) {
+                return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                       (c >= '0' && c <= '9') || c == '-' || c == '_';
+            })) { json_err(resp, 503, "VirusTotal is not configured"); return; }
+            if (req.body.size() > 1024) { json_err(resp, 400, "Invalid request"); return; }
+            auto payload = JsonValue::parse(req.body);
+            if (!payload || !payload->is_object() || payload->size() != 1 ||
+                !payload->get("sha256").is_string() || !valid_vt_sha256(payload->get("sha256").as_sv())) {
+                json_err(resp, 400, "Expected a SHA-256 hash"); return;
+            }
+            {
+                std::lock_guard lock(vt_mu_);
+                auto now = std::chrono::steady_clock::now();
+                if (vt_last_request_ != std::chrono::steady_clock::time_point{} &&
+                    now - vt_last_request_ < std::chrono::seconds(16)) {
+                    json_err(resp, 429, "Please wait before another VirusTotal lookup"); return;
+                }
+                vt_last_request_ = now;
+            }
+            OutboundRequest outgoing = make_vt_request(payload->get("sha256").as_sv(), key);
+            std::string response_body;
+            outgoing.on_data = [&](const char* data, size_t len) {
+                if (len > 1024 * 1024 - response_body.size()) return false;
+                response_body.append(data, len); return true;
+            };
+            auto result = HttpClient::instance().perform(outgoing);
+            if (!result.ok) { json_err(resp, 502, "VirusTotal unavailable"); return; }
+            if (result.status_code == 404) { json_err(resp, 404, "No existing VirusTotal report"); return; }
+            if (result.status_code == 429) { json_err(resp, 429, "VirusTotal quota exceeded"); return; }
+            if (result.status_code != 200) { json_err(resp, 502, "VirusTotal request failed"); return; }
+            auto report = parse_vt_report(response_body);
+            if (!report) { json_err(resp, 502, "Invalid VirusTotal report"); return; }
+            json_ok(resp, std::move(*report));
             return;
         }
 

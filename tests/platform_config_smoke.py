@@ -30,4 +30,7 @@ free = (root / 'deploy/render/render.free-demo.yaml').read_text()
 assert 'plan: free' in free and 'disk:' not in free
 assert 'healthCheckPath: /ping' in free and 'KOVA_DISPOSABLE_DEMO' in free
 assert 'generateValue: true' in free and 'runtime: docker' in free
+assert 'key: ALIST_WORKER_THREADS' in free and 'key: ALIST_TASK_WORKERS' in free
+assert 'key: ALIST_MAX_CONNECTIONS' in free
+assert 'key: ALIST_WORKER_THREADS' not in render
 print('Platform configuration invariants passed (no cloud deployment performed)')
