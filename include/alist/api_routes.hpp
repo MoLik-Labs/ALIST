@@ -9,6 +9,8 @@
 #include "alist/webdav_server.hpp"
 
 #include <string>
+#include <mutex>
+#include <chrono>
 
 namespace alist {
 
@@ -45,6 +47,8 @@ private:
     VfsEngine& vfs_;
     TaskManager& tasks_;
 
+    std::mutex vt_mu_;
+    std::chrono::steady_clock::time_point vt_last_request_{};
     BruteForceProtector login_bf_{8, 300, 300};
     BruteForceProtector share_bf_{12, 300, 300};
     TokenBucket down_limiter_;

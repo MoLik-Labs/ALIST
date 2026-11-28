@@ -12,5 +12,12 @@ services:
     envVars:
       - key: ALIST_ADMIN_PASSWORD
         generateValue: true
+      # Conservative concurrency for a small disposable instance, not a throughput guarantee.
+      - key: ALIST_WORKER_THREADS
+        value: "4"
+      - key: ALIST_TASK_WORKERS
+        value: "2"
+      - key: ALIST_MAX_CONNECTIONS
+        value: "128"
       - key: KOVA_DISPOSABLE_DEMO
         value: "true"

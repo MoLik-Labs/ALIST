@@ -11,6 +11,7 @@
 #include "alist/security.hpp"
 #include "alist/tasks.hpp"
 #include "alist/vfs.hpp"
+#include "alist/virustotal.hpp"
 #include "alist/xml.hpp"
 #include "c_libs.hpp"
 
@@ -363,6 +364,52 @@ void test_ssrf_and_antiredos_glob() {
 // ============================================================================
 // 5. Bounded JSON & XML Parser Security Tests
 // ============================================================================
+void test_resource_env_overrides() {
+    const char* keys[] = {"ALIST_WORKER_THREADS", "ALIST_TASK_WORKERS", "ALIST_MAX_CONNECTIONS", "KOVA_VIRUSTOTAL_API_KEY"};
+    std::vector<std::optional<std::string>> old;
+    for (auto key : keys) { const char* value = std::getenv(key); old.push_back(value ? std::optional<std::string>(value) : std::nullopt); }
+    ScopeExit restore([&] { for (size_t i = 0; i < old.size(); ++i) {
+        if (old[i]) setenv(keys[i], old[i]->c_str(), 1); else unsetenv(keys[i]);
+    }});
+    std::string dir = "/tmp/alist_resource_env_" + random_hex(6);
+    ScopeExit cleanup([&] { std::error_code ec; std::filesystem::remove_all(dir, ec); });
+    setenv(keys[0], "3", 1); setenv(keys[1], "2", 1); setenv(keys[2], "128", 1);
+    setenv(keys[3], "test-secret-never-persist", 1);
+    AppConfig cfg;
+    CHECK(cfg.load_or_create(dir));
+    CHECK(cfg.worker_threads == 3 && cfg.task_workers == 2 && cfg.max_connections == 128);
+    CHECK(cfg.virustotal_api_key == "test-secret-never-persist");
+    std::ifstream config(dir + "/config.json");
+    std::string persisted((std::istreambuf_iterator<char>(config)), std::istreambuf_iterator<char>());
+    CHECK(persisted.find("test-secret-never-persist") == std::string::npos);
+    CHECK(JsonValue::parse(persisted)->get("max_connections").as_i64() == 4096);
+    setenv(keys[0], "999", 1); setenv(keys[1], "0", 1); setenv(keys[2], "9999999", 1);
+    AppConfig bounded;
+    CHECK(bounded.load_or_create(dir));
+    CHECK(bounded.worker_threads == 64 && bounded.task_workers == 1 && bounded.max_connections == 65536);
+}
+
+void test_virustotal_report_validation() {
+    CHECK(valid_vt_sha256(std::string(64, 'a')));
+    CHECK(valid_vt_sha256(std::string(64, 'F')));
+    CHECK(!valid_vt_sha256(std::string(63, 'a')));
+    CHECK(!valid_vt_sha256(std::string(64, 'g')));
+    CHECK(!valid_vt_sha256(std::string(63, 'a') + "/"));
+    auto request = make_vt_request(std::string(64, 'A'), "dummy-key");
+    CHECK(request.url == "https://www.virustotal.com/api/v3/files/" + std::string(64, 'a'));
+    CHECK(request.headers.at("x-apikey") == "dummy-key");
+    CHECK(request.method == "GET" && request.body.empty());
+    CHECK(!request.follow_redirects && !request.allow_private_net && !request.insecure_tls);
+    CHECK(request.connect_timeout_ms == 3000 && request.timeout_ms == 10000);
+    auto ok = parse_vt_report(R"({"data":{"attributes":{"last_analysis_stats":{"malicious":2,"suspicious":1,"harmless":50,"undetected":30,"timeout":3},"last_analysis_date":1700000000}}})");
+    CHECK(ok.has_value());
+    CHECK(ok->get("malicious").as_i64() == 2);
+    CHECK(ok->get("last_analysis_date").as_i64() == 1700000000);
+    CHECK(!parse_vt_report("{}"));
+    CHECK(!parse_vt_report(R"({"data":{"attributes":{"last_analysis_stats":{"malicious":-1}}}})"));
+    CHECK(!parse_vt_report(R"({"data":{"attributes":{"last_analysis_stats":{"malicious":"2"}}}})"));
+}
+
 void test_json_and_xml_bounds() {
     std::string deep_json(100, '[');
     deep_json += "1";
@@ -1002,6 +1049,7 @@ void test_live_http_api_webdav_and_concurrency() {
     router.dispatch(disabled_mcp, disabled_response);
     CHECK(disabled_response.status == 404);
     cfg.enable_mcp = true;
+    cfg.virustotal_api_key = "test-key-is-not-a-real-key";
 
     HttpServer server("127.0.0.1", 0, 4, 256);
     server.set_stream_predicate([&](const HttpRequest& r) { return router.should_stream_request_body(r); });
@@ -1293,6 +1341,17 @@ void test_live_http_api_webdav_and_concurrency() {
     CHECK(db.update_role(mcp_role));
     CHECK(mcp(mcp_jwt, R"({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"fs_list","arguments":{"path":"/"}}})").body.find("isError\":true") != std::string::npos);
 
+    auto vt_post = [&](const std::string& token, const std::string& body) {
+        return raw_http_call(port, "POST /api/admin/security/virustotal HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nAuthorization: " + token + "\r\nContent-Length: " + std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" + body);
+    };
+    auto vt_anonymous = vt_post("", R"({"sha256":"bad"})");
+    CHECK(JsonValue::parse(vt_anonymous.body)->get("code").as_i64() == 401);
+    auto vt_bad = vt_post(admin_jwt, R"({"sha256":"../../example"})");
+    CHECK(JsonValue::parse(vt_bad.body)->get("code").as_i64() == 400);
+    CHECK(vt_bad.headers["cache-control"] == "no-store");
+    auto vt_extra = vt_post(admin_jwt, R"({"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","url":"https://example.com"})");
+    CHECK(JsonValue::parse(vt_extra.body)->get("code").as_i64() == 400);
+
     std::string huge_page_body = R"({"path":"/local","page":9223372036854775807,"per_page":9223372036854775807})";
     auto huge_page = raw_http_call(port,
         "POST /api/fs/list HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: " + admin_jwt +
@@ -1322,6 +1381,9 @@ void test_live_http_api_webdav_and_concurrency() {
         std::to_string(alice_login.size()) + "\r\nConnection: close\r\n\r\n" + alice_login);
     std::string alice_jwt = JsonValue::parse(al_res.body)->get("data").get("token").as_str();
     CHECK(!alice_jwt.empty());
+    auto vt_member = vt_post(alice_jwt, R"({"sha256":"bad"})");
+    CHECK(JsonValue::parse(vt_member.body)->get("code").as_i64() == 403);
+
 
     // Monitoring relay is admin-only and rejects arbitrary origins before any outbound request.
     auto uptime_user = raw_http_call(port,
@@ -1576,6 +1638,8 @@ int main() {
     RUN_TEST(test_crypto_jwt_and_totp_security);
     RUN_TEST(test_ssrf_and_antiredos_glob);
     RUN_TEST(test_json_and_xml_bounds);
+    RUN_TEST(test_virustotal_report_validation);
+    RUN_TEST(test_resource_env_overrides);
     RUN_TEST(test_database_vault_and_fts5);
     RUN_TEST(test_catbox_public_manifest_driver);
     RUN_TEST(test_remote_copy_http_failure);
