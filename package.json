@@ -11,9 +11,9 @@
     "test:go-ui": "node tests/go_webui_smoke.mjs",
     "test:skills": "node tests/skills_integrity.mjs",
     "test:pages": "node tests/cloudflare_pages_test.mjs",
-    "docs:dev": "vitepress dev docs/guide --host 127.0.0.1",
-    "docs:build": "vitepress build docs/guide",
-    "docs:preview": "python3 -m http.server 4173 --bind 0.0.0.0 --directory docs/guide/.vitepress/dist",
+    "docs:dev": "node scripts/build_starlight_content.mjs && node scripts/docs_astro.mjs dev --root docs/starlight --host 127.0.0.1",
+    "docs:build": "node scripts/build_starlight_content.mjs && node scripts/docs_astro.mjs build --root docs/starlight && node scripts/docs_legacy_redirects.mjs",
+    "docs:preview": "python3 -m http.server 4173 --bind 0.0.0.0 --directory docs/starlight/dist",
     "test:cf-native": "node tests/cloudflare_native_test.mjs",
     "test:cf-ui": "node tests/cloudflare_native_ui_test.mjs && node tests/cloudflare_ui_smoke.mjs",
     "test:docs-build": "node tests/docs_bilingual_smoke.mjs",
@@ -30,7 +30,9 @@
     "test:cf-login": "node tests/cloudflare_google_login_test.mjs"
   },
   "devDependencies": {
-    "happy-dom": "21.0.4",
-    "vitepress": "1.6.4"
+    "@astrojs/markdown-remark": "7.3.0",
+    "@astrojs/starlight": "0.43.2",
+    "astro": "7.4.13",
+    "happy-dom": "21.0.4"
   }
 }

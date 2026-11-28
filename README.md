@@ -18,7 +18,7 @@
 
 The browser UI is embedded in the native binary. Runtime assets are served locally; the application does not need a third-party CDN.
 
-The bilingual documentation website is built with [VitePress](https://github.com/vuejs/vitepress) (MIT) from [`docs/guide`](docs/guide/). Run `npm ci` and `npm run docs:dev`, or `npm run docs:build` for GitHub Pages. Set GitHub Pages source to **GitHub Actions** and run the documentation workflow. For a custom domain set `DOCS_BASE=/`; project sites default to `/<repository>/`. The previous static docs remain in [`docs/site`](docs/site/) until migration is complete. The experimental Go server provides liveness and an optional separate local API with opt-in create-only uploads, but is **not a production replacement**; see [migration status](docs/go-migration.md).
+The bilingual documentation website is built with [Astro Starlight](https://starlight.astro.build/) from [`docs/guide`](docs/guide/). Run `npm ci` and `npm run docs:dev`, or `npm run docs:build` for GitHub Pages. Set GitHub Pages source to **GitHub Actions** and run the documentation workflow. For a custom domain set `DOCS_BASE=/`; project sites default to `/<repository>/`. The previous static docs remain in [`docs/site`](docs/site/) until migration is complete. The experimental Go server provides liveness and an optional separate local API with opt-in create-only uploads, but is **not a production replacement**; see [migration status](docs/go-migration.md).
 
 The complete pinned AList Go backend source is also preserved as an [isolated upstream baseline](upstream/README.md). It is not integrated with Kova, has no bundled frontend build, and must not use an existing Kova data directory.
 

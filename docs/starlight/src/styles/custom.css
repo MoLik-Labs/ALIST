@@ -1,0 +1,17 @@
+/* Kova's documentation is a reading surface: preserve Starlight's accessible
+   controls while making navigation and reading measure calm and consistent. */
+:root {
+  --sl-color-accent-low: #172b51;
+  --sl-color-accent: #85acff;
+  --sl-color-accent-high: #dce8ff;
+  --sl-content-width: 49rem;
+}
+:root[data-theme='light'] {
+  --sl-color-accent-low: #e7efff;
+  --sl-color-accent: #285dc5;
+  --sl-color-accent-high: #102c69;
+}
+.sl-markdown-content { line-height: 1.72; }
+.sl-markdown-content a { text-underline-offset: .18em; }
+.sl-markdown-content table { display: block; overflow-x: auto; }
+::selection { background: var(--sl-color-accent-low); color: var(--sl-color-text); }
